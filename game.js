@@ -379,7 +379,7 @@
     if(!['drafting','outpost'].includes(kind)&&!(s.blueprints[kind]>0)){flash('설계도 작업대에서 먼저 설계도를 만드세요');return;}
     if(Math.abs(s.player.x-x)>190){flash('가까운 지면에 설계도를 놓으세요');return;}
     const floor=flatFoundation(x,info.w,clickedY);
-    if(floor===null||Math.abs(floor-clickedY)>33||Math.abs(floor-(s.player.y+24))>95){flash('블록을 평탄하게 만들고 그 지면을 터치하세요');return;}
+    if(floor===null||Math.abs(floor-clickedY)>65||Math.abs(floor-(s.player.y+24))>95){flash('블록을 평탄하게 만들고 그 지면을 터치하세요');return;}
     if(s.sites.some(a=>Math.abs(a.x-x)<(buildings[a.kind].w+info.w)*.31+11&&Math.abs(siteGroundY(a)-floor)<55)){flash('건물 사이의 간격이 부족해요');return;}
     s.sites.push({x,y:floor,kind,put:{},progress:0,done:false});
     if(!['drafting','outpost'].includes(kind))s.blueprints[kind]--;
@@ -405,7 +405,7 @@
   }
   function beginChest(){if(!s.inv.chest){flash('상자가 없어요. 제작소에서 만드세요');return;}mode='chest';hideModal();flash('지상의 평평한 땅을 터치해 상자를 놓으세요');}
   function placeChest(x,clickedY=groundY(x)){const center=(Math.floor(x/TILE)+.5)*TILE,y=flatFoundation(center,34,clickedY);
-    if(y===null||Math.abs(center-s.player.x)>155||Math.abs(y-(s.player.y+24))>75||Math.abs(y-clickedY)>33){flash('캐릭터 가까운 평평한 지면을 선택하세요');return;}
+    if(y===null||Math.abs(center-s.player.x)>155||Math.abs(y-(s.player.y+24))>75||Math.abs(y-clickedY)>65){flash('캐릭터 가까운 평평한 지면을 선택하세요');return;}
     if(s.chests.some(a=>Math.abs(a.x-center)<54&&Math.abs((a.y??groundY(a.x))-y)<40)||s.sites.some(a=>Math.abs(a.x-center)<(buildings[a.kind].w*.31+25)&&Math.abs(siteGroundY(a)-y)<50)){flash('상자를 놓을 평평한 빈 자리가 필요해요');return;}
     if(!s.inv.chest)return;
     s.inv.chest--;s.chests.push({x:center,y,contents:{}});mode=null;flash(`상자 설치 완료${withinOutpost(center,y)?'':' · 전초기지 밖: 다음 날 파괴'}`);save(true);
