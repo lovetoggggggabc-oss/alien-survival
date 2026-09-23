@@ -4,8 +4,9 @@
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
   const $ = id => document.getElementById(id);
-  const WORLD_W = 2304, SURFACE = 340, TILE = 32, COLS = WORLD_W / TILE, ROWS = 26;
-  const WORLD_H = SURFACE + ROWS * TILE;
+  const mapCanvas=$('minimap'),mapCtx=mapCanvas.getContext('2d');
+  const WORLD_W = 6144, ORIGIN = 145, SURFACE = 340, TILE = 24, COLS = WORLD_W / TILE, ROWS = 48;
+  const WORLD_H = ORIGIN + ROWS * TILE;
   const DAY = 540, NIGHT = 240, CYCLE = DAY + NIGHT;
   const names = { stone:'돌', dirt:'흙', wood:'나무', metal:'금속', fiber:'섬유', crystal:'발광 수정', food:'식량', medkit:'회복약', ladder:'사다리' };
   const buildings = {
@@ -18,18 +19,30 @@
   const crafts = {
     pickaxe:{name:'강화 곡괭이',description:'땅과 광물을 더 빠르게 캡니다',cost:{stone:4,metal:3,crystal:1}},
     sword:{name:'강화 무기',description:'공격 피해가 증가합니다',cost:{metal:4,fiber:2,crystal:1}},
+    spear:{name:'수정 창',description:'조금 더 먼 거리에서 공격합니다',cost:{stone:3,wood:2,crystal:3}},
+    armor:{name:'금속 방어복',description:'몬스터에게 받는 피해를 줄입니다',cost:{metal:5,fiber:3}},
     lamp:{name:'탐사 등불',description:'지하를 더 넓게 비춥니다',cost:{metal:2,crystal:1}},
     ladder:{name:'사다리 ×4',description:'빈 공간을 터치해 설치하고 올라갑니다',cost:{stone:1,fiber:2}},
     medkit:{name:'회복약',description:'가방에서 사용하면 체력 35 회복',cost:{fiber:3,food:2}}
+  };
+  const gear = {
+    basicSword:{name:'기본 무기',slot:'weapon',detail:'공격력 18'},
+    sword:{name:'강화 무기',slot:'weapon',detail:'공격력 30'},
+    spear:{name:'수정 창',slot:'weapon',detail:'공격력 25 · 긴 사거리'},
+    basicPickaxe:{name:'기본 곡괭이',slot:'tool',detail:'채굴력 1'},
+    pickaxe:{name:'강화 곡괭이',slot:'tool',detail:'채굴력 2'},
+    armor:{name:'금속 방어복',slot:'armor',detail:'받는 피해 감소'},
+    lamp:{name:'탐사 등불',slot:'light',detail:'지하 시야 증가'}
   };
   const plans = {
     workshop:{cost:{wood:1,fiber:1}}, bed:{cost:{wood:2,fiber:1}},
     farm:{cost:{wood:2,stone:1}}, wall:{cost:{stone:2,dirt:2}}
   };
   const blockTypes={dirt:1,stone:2,wood:5};
-  const initial = () => ({version:3,time:0,day:1,hp:100,food:4,
+  const initial = () => ({version:4,time:0,day:1,hp:100,food:4,
     inv:{stone:5,dirt:4,wood:2,metal:2,fiber:3,crystal:0,ladder:0,medkit:0},
     upgrades:{pickaxe:false,sword:false,lamp:false},
+    ownedGear:{basicSword:true,basicPickaxe:true},equipped:{weapon:'basicSword',tool:'basicPickaxe',armor:null,light:null},
     player:{x:880,y:SURFACE-28,vy:0,facing:1},sites:[],allies:[],enemies:[],resources:[],
     terrain:null,ladders:[],placedBlocks:{},blueprints:{},settings:{joystickSize:108},kills:0});
   let s;
@@ -47,27 +60,64 @@
   s.upgrades = {...initial().upgrades,...s.upgrades};
   s.player = {...initial().player,...s.player};
   s.sites ||= []; s.allies ||= []; s.resources ||= []; s.enemies ||= []; s.ladders ||= [];
-  s.placedBlocks ||= {};s.blueprints ||= {};s.settings={...initial().settings,...s.settings};s.version=3;
-  const hash = (x,y) => { let n = Math.imul(x+173,374761393)^Math.imul(y+71,668265263); n=Math.imul(n^(n>>>13),1274126177); return ((n^(n>>>16))>>>0)/4294967295; };
-  function makeTerrain() {
-    return Array.from({length:ROWS},(_,r)=>Array.from({length:COLS},(_,c)=>{
-      if (r===0) return 1;
-      const cave = hash(Math.floor(c/3),Math.floor(r/3))*0.53 + hash(c,r)*0.47;
-      if (r>2 && cave > 0.72) return 0;
-      const ore = hash(c+141,r+19);
-      if (r>3 && ore>.975) return 4;
-      if (r>1 && ore>.91) return 3;
-      return r<3 && ore<.52 ? 1 : 2;
-    }));
+  s.placedBlocks ||= {};s.blueprints ||= {};s.settings={...initial().settings,...s.settings};
+  s.ownedGear={...initial().ownedGear,...s.ownedGear};s.equipped={...initial().equipped,...s.equipped};
+  for(const key of ['pickaxe','sword','lamp'])if(s.upgrades[key]){
+    s.ownedGear[key]=true;
+    if(!s.equipped[gear[key].slot]||s.equipped[gear[key].slot]===initial().equipped[gear[key].slot])s.equipped[gear[key].slot]=key;
   }
-  if (!s.terrain || s.terrain.length!==ROWS) s.terrain = makeTerrain();
+  const hash = (x,y) => { let n = Math.imul(x+173,374761393)^Math.imul(y+71,668265263); n=Math.imul(n^(n>>>13),1274126177); return ((n^(n>>>16))>>>0)/4294967295; };
+  function surfaceRow(c){
+    const x=c*TILE;
+    if(x>=720&&x<=1200)return 8;
+    const mountains=5*Math.exp(-Math.pow((x-1930)/290,2))+7*Math.exp(-Math.pow((x-4520)/350,2));
+    const hills=2.3*Math.sin(c/17)+1.3*Math.sin(c/7)+1.1*Math.sin(c/39);
+    const valley=2*Math.exp(-Math.pow((x-3250)/250,2));
+    return Math.max(2,Math.min(12,Math.round(8-hills-mountains+valley)));
+  }
+  const surfaceRows=Array.from({length:COLS},(_,c)=>surfaceRow(c));
+  function groundY(x){const c=Math.max(0,Math.min(COLS-1,Math.floor(x/TILE)));return ORIGIN+surfaceRows[c]*TILE;}
+  function makeTerrain(){return Array.from({length:ROWS},(_,r)=>Array.from({length:COLS},(_,c)=>{
+    const top=surfaceRows[c];if(r<top)return 0;if(r===top)return 1;
+    if(r>top+3){
+      const chambers=[[35,20,12,4],[91,28,15,6],[143,17,11,4],[205,31,17,6],[238,20,10,4]];
+      if(chambers.some(([cx,cy,rx,ry])=>((c-cx)/rx)**2+((r-cy)/ry)**2<1))return 0;
+      const tunnelA=top+9+Math.round(2.3*Math.sin(c/13));
+      const tunnelB=top+22+Math.round(2*Math.sin(c/19));
+      if(Math.abs(r-tunnelA)<=1||Math.abs(r-tunnelB)<=1)return 0;
+      if(hash(Math.floor(c/3),Math.floor(r/3))*.6+hash(c,r)*.4>.76)return 0;
+    }
+    const ore=hash(c+141,r+19);
+    if(r>top+5&&ore>.975)return 4;
+    if(r>top+3&&ore>.91)return 3;
+    return r<top+3?1:2;
+  }));}
+  const oldTerrain=s.terrain;
+  if(!s.terrain||s.terrain.length!==ROWS||s.terrain[0]?.length!==COLS){
+    s.terrain=makeTerrain();
+    if(oldTerrain?.length===26){
+      for(let r=0;r<26;r++)for(let c=0;c<72;c++)if(oldTerrain[r]?.[c]===0){
+        const cx=(c+.5)*32,cy=340+(r+.5)*32;
+        const nc=Math.floor(cx/TILE),nr=Math.floor((cy-ORIGIN)/TILE);
+        if(nr>=surfaceRows[nc]&&nr<ROWS)s.terrain[nr][nc]=0;
+      }
+    }
+    const oldPlaced=s.placedBlocks;s.placedBlocks={};
+    for(const [key,type] of Object.entries(oldPlaced)){
+      const [c,r]=key.split(',').map(Number),nc=Math.floor((c+.5)*32/TILE),nr=Math.floor((340+(r+.5)*32-ORIGIN)/TILE);
+      if(nc>=0&&nc<COLS&&nr>=0&&nr<ROWS&&s.terrain[nr][nc]===0)s.placedBlocks[`${nc},${nr}`]=type;
+    }
+    s.ladders=s.ladders.map(a=>({c:Math.floor((a.c+.5)*32/TILE),r:Math.floor((340+(a.r+.5)*32-ORIGIN)/TILE)}));
+    s.player.y=groundY(s.player.x)-28;s.player.vy=0;
+  }
+  s.version=4;
   const random=(a,b)=>a+Math.random()*(b-a);
   const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
   function addResource() {
     const types=['stone','wood','wood','fiber','fiber','food','food','metal'];
     s.resources.push({x:random(56,WORLD_W-56),type:types[Math.floor(random(0,types.length))],hp:2});
   }
-  while (s.resources.length < 35) addResource();
+  while (s.resources.length < 85) addResource();
   if (!s.resources.some(a=>a.type==='wood'&&Math.abs(a.x-s.player.x)<170))
     s.resources.push({x:clamp(s.player.x+74,56,WORLD_W-56),type:'wood',hp:3});
 
@@ -86,7 +136,7 @@
   function flash(message) { $('toast').textContent=message;$('toast').classList.add('show');toastClock=3; }
   function save(silent=false) { localStorage.setItem('alien-survival-save',JSON.stringify(s));if(!silent) flash('게임을 저장했어요'); }
   const phase=()=>s.time%CYCLE<DAY?'낮':'밤';
-  const nearSurface=()=>s.player.y<SURFACE+45;
+  const nearSurface=()=>s.player.y<groundY(s.player.x)+45;
   const nearSite=(site,radius=115)=>nearSurface()&&Math.abs(s.player.x-site.x)<radius;
   const costText=cost=>Object.entries(cost).map(([k,n])=>`${names[k]} ${n}`).join(' · ');
   const canPay=cost=>Object.entries(cost).every(([k,n])=>(k==='food'?s.food:s.inv[k]||0)>=n);
@@ -96,10 +146,10 @@
 
   function tileAt(c,r){
     if(c<0||c>=COLS||r>=ROWS)return 2;
-    if(r< -5)return 0;
-    return s.placedBlocks[`${c},${r}`]|| (r<0?0:s.terrain[r][c]);
+    if(r<0)return 0;
+    return s.placedBlocks[`${c},${r}`]||s.terrain[r][c];
   }
-  function solidPoint(x,y){if(y<SURFACE-5*TILE)return false;return tileAt(Math.floor(x/TILE),Math.floor((y-SURFACE)/TILE))!==0;}
+  function solidPoint(x,y){if(y<ORIGIN)return false;return tileAt(Math.floor(x/TILE),Math.floor((y-ORIGIN)/TILE))!==0;}
   function blocked(x,y){return solidPoint(x-8,y+2)||solidPoint(x+8,y+2)||solidPoint(x-8,y+27)||solidPoint(x+8,y+27);}
   function moveAxis(amount,axis){const p=s.player,n=Math.ceil(Math.abs(amount)/4),unit=amount/n;if(!n)return false;for(let i=0;i<n;i++){
     const nx=axis==='x'?p.x+unit:p.x,ny=axis==='y'?p.y+unit:p.y;
@@ -108,21 +158,21 @@
   }return false;}
   function grounded(){return blocked(s.player.x,s.player.y+2);}
   function jump(){if(grounded()){s.player.vy=-332;flash('점프!');}}
-  function inReach(c,r){const x=c*TILE+TILE/2,y=SURFACE+r*TILE+TILE/2;
-    return Math.hypot(x-s.player.x,y-(s.player.y+16))<98;}
+  function inReach(c,r){const x=c*TILE+TILE/2,y=ORIGIN+r*TILE+TILE/2;
+    return Math.hypot(x-s.player.x,y-(s.player.y+16))<80;}
   function selectDigTile(){
     if(targetTile&&inReach(targetTile.c,targetTile.r)&&tileAt(targetTile.c,targetTile.r))return targetTile;
     const p=s.player,down=joystick.y>.37,up=joystick.y<-.55;
     const choices=down?[[p.x,p.y+43],[p.x+p.facing*26,p.y+44]]:
       up?[[p.x,p.y-17],[p.x+p.facing*30,p.y+2]]:
       [[p.x+p.facing*30,p.y+17],[p.x+p.facing*28,p.y+32],[p.x,p.y+43]];
-    for(const [x,y] of choices){let c=Math.floor(x/TILE),r=Math.floor((y-SURFACE)/TILE);
+    for(const [x,y] of choices){let c=Math.floor(x/TILE),r=Math.floor((y-ORIGIN)/TILE);
       if(tileAt(c,r)&&inReach(c,r))return {c,r};}
     return null;
   }
-  function dig(c,r){const type=tileAt(c,r);if(!type||!inReach(c,r))return false;
-    const key=`${c},${r}`;s.damage ||= {};s.damage[key]=(s.damage[key]||0)+(s.upgrades.pickaxe?2:1);
-    const hp=type===1||type===5?1:type===2?2:3;
+  function dig(c,r){if(c<0||c>=COLS||r<0||r>=ROWS)return false;const type=tileAt(c,r);if(!type||!inReach(c,r))return false;
+    const key=`${c},${r}`;s.damage ||= {};s.damage[key]=(s.equipped.tool==='pickaxe'?2:1)+(s.damage[key]||0);
+    const hp=type===1?3:type===5?4:type===2?6:type===3?8:9;
     if(s.damage[key]>=hp){
       if(s.placedBlocks[key])delete s.placedBlocks[key];else if(r>=0)s.terrain[r][c]=0;
       delete s.damage[key];const gain=type===1?'dirt':type===3?'metal':type===4?'crystal':type===5?'wood':'stone';
@@ -139,9 +189,9 @@
   function beginBlock(kind){if(!s.inv[kind]){flash(`${names[kind]}이 부족해요`);return;}
     mode=`place:${kind}`;hideModal();flash(`${names[kind]} 설치: 가까운 빈 칸을 터치하세요`);}
   function placeBlock(c,r,kind){
-    if(c<0||c>=COLS||r< -5||r>=ROWS||!inReach(c,r)){flash('캐릭터 가까운 칸을 선택하세요');return;}
+    if(c<0||c>=COLS||r<0||r>=ROWS||!inReach(c,r)){flash('캐릭터 가까운 칸을 선택하세요');return;}
     if(tileAt(c,r)){flash('이미 블록이 있는 칸이에요');return;}
-    const p=s.player,x=c*TILE,y=SURFACE+r*TILE;
+    const p=s.player,x=c*TILE,y=ORIGIN+r*TILE;
     if(x<p.x+9&&x+TILE>p.x-9&&y<p.y+28&&y+TILE>p.y){flash('캐릭터가 있는 곳에는 설치할 수 없어요');return;}
     if(![[c-1,r],[c+1,r],[c,r-1],[c,r+1]].some(([a,b])=>tileAt(a,b))){flash('다른 블록에 붙여 설치하세요');return;}
     if(!s.inv[kind]){mode=null;flash(`${names[kind]}이 부족해요`);return;}
@@ -174,13 +224,18 @@
     flash('땅이나 자원 가까이 이동하세요');
   }
   function damageEnemy(enemy,amount){enemy.hp-=amount;if(enemy.hp<=0){s.enemies.splice(s.enemies.indexOf(enemy),1);s.kills++;if(Math.random()<.35){s.food++;flash('식량 +1');}}}
-  function attack(){const p=s.player,enemy=s.enemies.filter(e=>Math.abs(e.x-p.x)<77&&Math.abs((SURFACE-25)-(p.y+14))<74).sort((a,b)=>Math.abs(a.x-p.x)-Math.abs(b.x-p.x))[0];
-    if(enemy)damageEnemy(enemy,s.upgrades.sword?30:18);else flash('공격 범위에 적이 없어요');}
+  function attack(){const p=s.player,reach=s.equipped.weapon==='spear'?116:77;
+    const enemy=s.enemies.filter(e=>Math.abs(e.x-p.x)<reach&&Math.abs((groundY(e.x)-25)-(p.y+14))<74).sort((a,b)=>Math.abs(a.x-p.x)-Math.abs(b.x-p.x))[0];
+    if(enemy)damageEnemy(enemy,s.equipped.weapon==='sword'?30:s.equipped.weapon==='spear'?25:18);else flash('공격 범위에 적이 없어요');}
   function build(x,kind){if(!nearSurface()){flash('건물은 지상에 설치할 수 있어요');return;}
     const info=buildings[kind];x=clamp(x,50,WORLD_W-50);
     if(kind!=='drafting'&&!(s.blueprints[kind]>0)){flash('설계도 작업대에서 먼저 설계도를 만드세요');return;}
     if(Math.abs(s.player.x-x)>190){flash('가까운 지면에 설계도를 놓으세요');return;}
-    for(let c=Math.floor((x-info.w/2)/TILE);c<=Math.floor((x+info.w/2)/TILE);c++)if(!tileAt(c,0)){flash('파낸 땅 위에는 건물을 놓을 수 없어요');return;}
+    const foundation=surfaceRows[Math.floor(x/TILE)];
+    for(let c=Math.floor((x-info.w/2)/TILE);c<=Math.floor((x+info.w/2)/TILE);c++)
+      if(c<0||c>=COLS||surfaceRows[c]!==foundation||!tileAt(c,foundation)){
+        flash('평탄하고 파이지 않은 지면에 설치하세요');return;
+      }
     if(s.sites.some(a=>Math.abs(a.x-x)<(buildings[a.kind].w+info.w)/2+13)){flash('건물 사이의 간격이 부족해요');return;}
     s.sites.push({x,kind,put:{},progress:0,done:false});
     if(kind!=='drafting')s.blueprints[kind]--;
@@ -194,12 +249,12 @@
     flash(`${buildings[kind].name} 설계도 +1`);showDrafting();
   }
   function craft(kind){const recipe=crafts[kind];if(!workshopReady()){flash('완성된 제작소 가까이에서 제작하세요');return;}
-    if(['pickaxe','sword','lamp'].includes(kind)&&s.upgrades[kind]){flash('이미 제작한 장비예요');return;}
+    if(gear[kind]&&s.ownedGear[kind]){flash('이미 제작한 장비예요');return;}
     if(!canPay(recipe.cost)){flash('제작 재료가 부족해요');return;}
     pay(recipe.cost);
-    if(['pickaxe','sword','lamp'].includes(kind))s.upgrades[kind]=true;
+    if(gear[kind])s.ownedGear[kind]=true;
     else s.inv[kind]+=kind==='ladder'?4:1;
-    flash(`${recipe.name} 제작 완료`);showCraft();
+    flash(`${recipe.name} 제작 완료 · 가방에서 장착하세요`);showCraft();
   }
   function recruit(){const beds=s.sites.filter(a=>a.kind==='bed'&&a.done).length;
     if(s.allies.length>=beds){flash('완성된 빈 침대가 필요해요');return;}
@@ -208,14 +263,20 @@
   }
   function useMedkit(){if(!s.inv.medkit||s.hp>=100)return;s.inv.medkit--;s.hp=Math.min(100,s.hp+35);flash('체력 35 회복');showBag();}
   function beginLadder(){if(!s.inv.ladder){flash('사다리가 없어요');return;}mode='ladder';hideModal();flash('근처 지하 빈 칸을 터치해 사다리를 설치하세요');}
-  function placeLadder(c,r){if(r<0||tileAt(c,r)||!inReach(c,r)){flash('가까운 지하 빈 칸을 터치하세요');return;}
+  function placeLadder(c,r){if(c<0||c>=COLS||r<surfaceRows[c]||r>=ROWS||tileAt(c,r)||!inReach(c,r)){flash('가까운 지하 빈 칸을 터치하세요');return;}
     if(s.ladders.some(a=>a.c===c&&a.r===r)){flash('이미 사다리가 있어요');return;}
     s.ladders.push({c,r});s.inv.ladder--;mode=s.inv.ladder?'ladder':null;flash('사다리 설치 완료');}
 
   function showModal(title,html){$('modal-title').textContent=title;$('modal-body').innerHTML=html;$('overlay').classList.add('open');}
   function hideModal(){$('overlay').classList.remove('open');}
   const item=(icon,key,count,action='')=>`<div class="inventory-slot"><span class="icon">${icon}</span><div><span class="item-name">${names[key]||key}</span><span class="item-count">${count}개</span></div>${action}</div>`;
+  const slotNames={weapon:'무기',tool:'채굴 도구',armor:'방어구',light:'조명'};
+  const slotIcons={weapon:'⚔',tool:'⛏',armor:'▣',light:'✧'};
+  function equipmentRows(slot){return Object.entries(gear).filter(([id,g])=>g.slot===slot&&s.ownedGear[id]).map(([id,g])=>
+    `<div class="inventory-slot"><span class="icon">${slotIcons[slot]}</span><div><span class="item-name">${g.name}</span><span class="item-count">${g.detail}</span></div><button data-equip="${id}" ${s.equipped[slot]===id?'disabled':''}>${s.equipped[slot]===id?'장착 중':'장착'}</button></div>`).join('')||'<p class="section-note">제작소에서 만들 수 있어요.</p>';}
   function showBag(){showModal('🎒 가방',`
+    <h3>장착 장비</h3><p class="section-note">제작소에서 만든 장비를 여기서 바꿔 장착하세요.</p>
+    ${Object.keys(slotNames).map(slot=>`<h3>${slotIcons[slot]} ${slotNames[slot]} · ${gear[s.equipped[slot]]?.name||'없음'}</h3><div class="equipment-list">${equipmentRows(slot)}</div>`).join('')}
     <h3>설치할 수 있는 재료</h3><p class="section-note">설치를 누르고 가까운 빈 칸을 터치하세요. 캔 블록은 가방으로 돌아옵니다.</p>
     <div class="inventory-grid">
       ${item('▧','stone',s.inv.stone,`<button data-place="stone" ${!s.inv.stone?'disabled':''}>설치</button>`)}
@@ -224,9 +285,7 @@
     </div><h3>채집한 재료</h3><div class="inventory-grid">
       ${item('⬡','metal',s.inv.metal)}${item('❀','fiber',s.inv.fiber)}
       ${item('✦','crystal',s.inv.crystal)}${item('◉','food',s.food)}
-    </div><h3>장비 · 소비품</h3><div class="inventory-grid">
-      <div class="inventory-slot"><span class="icon">⛏</span><div><span class="item-name">곡괭이</span><span class="item-count">${s.upgrades.pickaxe?'강화':'기본'}</span></div></div>
-      <div class="inventory-slot"><span class="icon">⚔</span><div><span class="item-name">무기</span><span class="item-count">${s.upgrades.sword?'강화':'기본'}</span></div></div>
+    </div><h3>소비품</h3><div class="inventory-grid">
       ${item('⚕','medkit',s.inv.medkit,`<button data-use="medkit" ${!s.inv.medkit||s.hp>=100?'disabled':''}>사용</button>`)}
       ${item('╫','ladder',s.inv.ladder,`<button data-use="ladder" ${!s.inv.ladder?'disabled':''}>배치</button>`)}
     </div><p class="hint">회복약은 체력 35를 회복합니다. 사다리를 설치하면 지하에서 위로 올라갈 수 있어요.</p>`);}
@@ -241,7 +300,7 @@
       ${!available.length?'<p class="section-note">제작한 다른 설계도가 아직 없어요.</p>':''}`);}
   function showCraft(){const ready=workshopReady(),exists=s.sites.some(a=>a.kind==='workshop'&&a.done);
     showModal('⚙ 아이템 제작',`<p class="hint">${ready?'제작소에서 제작할 수 있어요.':exists?'완성된 제작소 가까이 이동하세요.':'설계도 작업대에서 제작소 설계도를 만든 뒤 제작소를 건설하세요.'}</p>
-    ${Object.entries(crafts).map(([key,r])=>{const owned=['pickaxe','sword','lamp'].includes(key)&&s.upgrades[key];return `<div class="recipe"><div><b>${r.name}</b><small>${r.description}<br>${costText(r.cost)}</small></div><button data-craft="${key}" ${!ready||owned||!canPay(r.cost)?'disabled':''}>${owned?'보유':'제작'}</button></div>`;}).join('')}
+    ${Object.entries(crafts).map(([key,r])=>{const owned=!!gear[key]&&s.ownedGear[key];return `<div class="recipe"><div><b>${r.name}</b><small>${r.description}<br>${costText(r.cost)}</small></div><button data-craft="${key}" ${!ready||owned||!canPay(r.cost)?'disabled':''}>${owned?'보유':'제작'}</button></div>`;}).join('')}
     `);}
   function showSettings(){showModal('⚙ 설정',`<div class="settings-row"><div><b>조이스틱 크기</b><br><span class="section-note">작게 ← → 크게</span></div><input type="range" min="80" max="160" step="4" data-setting="joystick" value="${s.settings.joystickSize}" aria-label="조이스틱 크기"><span id="size-value">${s.settings.joystickSize}</span></div>
     <p class="hint">크기 설정은 자동으로 저장됩니다.</p><div class="settings-row"><span>현재 진행 상황</span><button data-save="1">저장</button></div>`);}
@@ -254,6 +313,7 @@
     if(b.dataset.build){mode=b.dataset.build;hideModal();flash(`${buildings[mode].name} 설계도: 지상의 빈 곳을 터치하세요`);}
     if(b.dataset.plan)createPlan(b.dataset.plan);
     if(b.dataset.craft)craft(b.dataset.craft);
+    if(b.dataset.equip&&s.ownedGear[b.dataset.equip]){const g=gear[b.dataset.equip];s.equipped[g.slot]=b.dataset.equip;save(true);showBag();flash(`${g.name} 장착 완료`);}
     if(b.dataset.place)beginBlock(b.dataset.place);
     if(b.dataset.use==='medkit')useMedkit();
     if(b.dataset.use==='ladder')beginLadder();
@@ -300,10 +360,10 @@
     if(['w','ArrowUp'].includes(e.key))keyboard.up=false;});
   function eventWorld(e){const bounds=canvas.getBoundingClientRect();return {x:(e.clientX-bounds.left)*logicalW/bounds.width+viewX,y:(e.clientY-bounds.top)*logicalH/bounds.height+viewY};}
   canvas.addEventListener('pointermove',e=>{if(mode&&mode!=='ladder')previewX=eventWorld(e).x;});
-  canvas.addEventListener('pointerdown',e=>{e.preventDefault();const p=eventWorld(e),c=Math.floor(p.x/TILE),r=Math.floor((p.y-SURFACE)/TILE);
+  canvas.addEventListener('pointerdown',e=>{e.preventDefault();const p=eventWorld(e),c=Math.floor(p.x/TILE),r=Math.floor((p.y-ORIGIN)/TILE);
     if(mode==='ladder'){placeLadder(c,r);return;}
     if(mode?.startsWith('place:')){placeBlock(c,r,mode.slice(6));return;}
-    if(mode&&buildings[mode]){if(Math.abs(p.y-SURFACE)>110)flash('지상의 평평한 곳을 터치하세요');else build(p.x,mode);return;}
+    if(mode&&buildings[mode]){if(Math.abs(p.y-groundY(p.x))>85)flash('지상의 평평한 곳을 터치하세요');else build(p.x,mode);return;}
     if(r>=-5&&tileAt(c,r)&&inReach(c,r)){targetTile={c,r};flash('선택한 블록을 채집 버튼으로 파세요');}
     else targetTile=null;
   });
@@ -312,7 +372,7 @@
     let move=clamp(joystick.x+(keyboard.right?1:0)-(keyboard.left?1:0),-1,1);
     if(Math.abs(move)<.12)move=0;if(move)p.facing=Math.sign(move);
     moveAxis(move*154*dt,'x');
-    const ladder=s.ladders.some(a=>Math.abs((a.c+.5)*TILE-p.x)<19&&Math.abs(SURFACE+(a.r+.5)*TILE-(p.y+14))<34);
+    const ladder=s.ladders.some(a=>Math.abs((a.c+.5)*TILE-p.x)<19&&Math.abs(ORIGIN+(a.r+.5)*TILE-(p.y+14))<34);
     if(ladder&&(joystick.y<-.25||keyboard.up)){p.vy=0;moveAxis(-105*dt,'y');}
     else{p.vy=clamp(p.vy+710*dt,-380,370);if(moveAxis(p.vy*dt,'y'))p.vy=0;}
     if(held.mine){mineCooldown-=dt;if(mineCooldown<=0){mine();mineCooldown=.28;}}
@@ -345,10 +405,10 @@
       const wall=s.sites.find(a=>a.done&&a.kind==='wall'&&Math.abs(a.x-enemy.x)<33);
       const tx=wall?wall.x:(nearSurface()?p.x:880);
       enemy.x+=Math.sign(tx-enemy.x)*clamp(40+s.day*2,40,87)*gameDt;
-      if(nearSurface()&&Math.abs(enemy.x-p.x)<26&&enemy.strike<=0){s.hp-=10;enemy.strike=1.2;
-        if(s.hp<=0){s.hp=100;s.food=Math.max(1,s.food-2);p.x=880;p.y=SURFACE-28;p.vy=0;s.enemies=[];flash('쓰러졌어요. 기지에서 회복했어요');break;}}
+      if(nearSurface()&&Math.abs(enemy.x-p.x)<26&&Math.abs(groundY(enemy.x)-p.y-28)<52&&enemy.strike<=0){s.hp-=s.equipped.armor==='armor'?6:10;enemy.strike=1.2;
+        if(s.hp<=0){s.hp=100;s.food=Math.max(1,s.food-2);p.x=880;p.y=groundY(880)-28;p.vy=0;s.enemies=[];flash('쓰러졌어요. 기지에서 회복했어요');break;}}
     }
-    if(s.resources.length<27&&Math.random()<gameDt*.3)addResource();
+    if(s.resources.length<72&&Math.random()<gameDt*.3)addResource();
     saveClock+=dt;if(saveClock>12){save(true);saveClock=0;}
     if(toastClock>0){toastClock-=dt;if(toastClock<=0)$('toast').classList.remove('show');}
     viewX=clamp(p.x-logicalW*.5,0,WORLD_W-logicalW);
@@ -357,60 +417,59 @@
 
   function rect(x,y,w,h,color){ctx.fillStyle=color;ctx.fillRect(Math.round(x),Math.round(y),Math.round(w),Math.round(h));}
   function text(str,x,y,size=12,color='#edf5ea'){ctx.font=`bold ${size}px monospace`;ctx.fillStyle=color;ctx.fillText(str,Math.round(x),Math.round(y));}
-  function drawBackground(){const night=phase()==='밤';let sky=ctx.createLinearGradient(0,0,0,SURFACE);
+  function drawBackground(){const night=phase()==='밤';let sky=ctx.createLinearGradient(0,0,0,400);
     sky.addColorStop(0,night?'#111c3b':'#2c5371');sky.addColorStop(1,night?'#494063':'#a08080');
-    ctx.fillStyle=sky;ctx.fillRect(0,-100,WORLD_W,SURFACE+100);
-    rect(0,SURFACE,WORLD_W,WORLD_H-SURFACE,'#192837');
-    for(let i=0;i<170;i++){const x=(i*373+83)%WORLD_W,y=11+(i*79)%280;
+    ctx.fillStyle=sky;ctx.fillRect(0,-100,WORLD_W,550);
+    rect(0,ORIGIN+2*TILE,WORLD_W,WORLD_H-ORIGIN-2*TILE,'#192837');
+    for(let i=0;i<300;i++){const x=(i*373+83)%WORLD_W,y=11+(i*79)%280;
       rect(x,y,i%8===0?3:2,2,night?'#c6def0':'#9cbfc8');}
     rect(1650,35,65,65,night?'#b6a4b7':'#d0bfa2');
     rect(1662,44,18,13,night?'#817897':'#aaa08e');
-    for(let i=0;i<27;i++){const x=i*91+(i*37)%27,height=48+Math.floor(hash(i,3)*95),width=29+Math.floor(hash(i,9)*43);
-      rect(x,SURFACE-height,width,height,night?'#2c3e5b':'#4b6878');
-      rect(x+6,SURFACE-height-10,width-13,13,night?'#5a6982':'#8da1a2');
-      if(i%4===0)rect(x+width/2-3,SURFACE-height-29,6,20,'#8198a7');}
-    for(let i=0;i<27;i++){const x=i*88+19,v=hash(i,17),biome=Math.floor(x/760);
+    for(let i=0;i<69;i++){const x=i*91+(i*37)%27,height=48+Math.floor(hash(i,3)*95),width=29+Math.floor(hash(i,9)*43),y=groundY(x);
+      rect(x,y-height,width,height,night?'#2c3e5b':'#4b6878');
+      rect(x+6,y-height-10,width-13,13,night?'#5a6982':'#8da1a2');
+      if(i%4===0)rect(x+width/2-3,y-height-29,6,20,'#8198a7');}
+    for(let i=0;i<69;i++){const x=i*88+19,v=hash(i,17),biome=Math.floor(x/760)%3,y=groundY(x);
       if(v>.55){const height=43+Math.floor(v*50),width=23+Math.floor(hash(i,8)*25);
-        rect(x+width/2-3,SURFACE-height+13,6,height-13,biome===1?'#536c75':'#536e66');
-        rect(x,SURFACE-height,width,15,biome===1?'#758bb2':biome===2?'#a1749f':'#81ac9c');
-        rect(x+6,SURFACE-height-8,width-12,10,biome===1?'#acb4d0':biome===2?'#c89fbb':'#abcfc0');
-        rect(x+8,SURFACE-height+7,3,3,'#e5d9b6');}
-      else{rect(x+2,SURFACE-20,5,20,'#507e6e');rect(x-5,SURFACE-27,21,12,biome===2?'#a780ad':'#81b99d');}}
-    for(const x of [316,1280,2040]){
-      rect(x-16,SURFACE-35,33,35,'#637d8c');rect(x-9,SURFACE-63,20,30,'#85b8bd');
-      rect(x-3,SURFACE-89,8,28,'#a2e1d4');rect(x+6,SURFACE-42,14,16,'#709caf');}
-    for(const x of [600,1770]){
-      rect(x-31,SURFACE-67,12,67,'#677b85');rect(x+20,SURFACE-67,12,67,'#677b85');
-      rect(x-30,SURFACE-76,62,12,'#8fa1a1');rect(x-4,SURFACE-92,9,16,'#a2c3b8');}
+        rect(x+width/2-3,y-height+13,6,height-13,biome===1?'#536c75':'#536e66');
+        rect(x,y-height,width,15,biome===1?'#758bb2':biome===2?'#a1749f':'#81ac9c');
+        rect(x+6,y-height-8,width-12,10,biome===1?'#acb4d0':biome===2?'#c89fbb':'#abcfc0');
+        rect(x+8,y-height+7,3,3,'#e5d9b6');}
+      else{rect(x+2,y-20,5,20,'#507e6e');rect(x-5,y-27,21,12,biome===2?'#a780ad':'#81b99d');}}
+    for(const x of [316,1280,2040,3310,4860,5600]){const y=groundY(x);
+      rect(x-16,y-35,33,35,'#637d8c');rect(x-9,y-63,20,30,'#85b8bd');
+      rect(x-3,y-89,8,28,'#a2e1d4');rect(x+6,y-42,14,16,'#709caf');}
+    for(const x of [600,1770,3890,5280]){const y=groundY(x);
+      rect(x-31,y-67,12,67,'#677b85');rect(x+20,y-67,12,67,'#677b85');
+      rect(x-30,y-76,62,12,'#8fa1a1');rect(x-4,y-92,9,16,'#a2c3b8');}
   }
   function drawTerrain(){const left=Math.max(0,Math.floor(viewX/TILE)-1),right=Math.min(COLS-1,Math.ceil((viewX+logicalW)/TILE)+1);
-    const top=Math.max(-5,Math.floor((viewY-SURFACE)/TILE)-1),bottom=Math.min(ROWS-1,Math.ceil((viewY+logicalH-SURFACE)/TILE)+1);
+    const top=Math.max(0,Math.floor((viewY-ORIGIN)/TILE)-1),bottom=Math.min(ROWS-1,Math.ceil((viewY+logicalH-ORIGIN)/TILE)+1);
     for(let r=top;r<=bottom;r++)for(let c=left;c<=right;c++){
-      const type=tileAt(c,r),x=c*TILE,y=SURFACE+r*TILE,noise=hash(c,r);
+      const type=tileAt(c,r),x=c*TILE,y=ORIGIN+r*TILE,noise=hash(c,r);
       if(type===0){if(r>=0){rect(x,y,TILE,TILE,'#1a2b38');if(noise>.68)rect(x+5,y+6,3,3,'#47666d');}continue;}
-      const biome=Math.floor(c*TILE/760);
-      const colors={1:r===0?['#695c53','#70605b','#745962'][biome]:'#68564f',2:['#44566a','#4a5b70','#504c66'][biome],3:'#4d6275',4:'#4b536c',5:'#806857'};
-      rect(x,y,31,31,colors[type]);
-      rect(x+2,y+2,19+noise*9,2,type===1?'#a18170':type===5?'#ae906c':'#617488');
-      if(noise>.32)rect(x+4+(noise*8|0),y+22,12+noise*8,2,'#34475a');
-      else{rect(x+7,y+16,3,3,'#647888');rect(x+21,y+25,4,2,'#334a5a');}
-      if(type===1&&r===0&&!s.placedBlocks[`${c},${r}`]){rect(x,y,32,7,'#7fa88e');rect(x+7,y-3,4,4,'#a9c3a0');}
-      if(type===5){rect(x+7,y+4,3,22,'#a58768');rect(x+20,y+5,3,20,'#a58768');}
-      if(type===3){rect(x+6,y+7,8,9,'#78b2bd');rect(x+20,y+18,6,6,'#9bd0cf');}
-      if(type===4){rect(x+11,y+3,9,21,'#a88fd2');rect(x+16,y+9,7,13,'#c9b9ed');rect(x+6,y+16,5,10,'#7d94c5');}
-      if(noise>.75&&type<3)rect(x+22,y+10,3,3,'#a195a1');
-      const dmg=s.damage?.[`${c},${r}`];if(dmg){rect(x+3,y+14,15,2,'#1d2c40');rect(x+15,y+8,2,19,'#1d2c40');}
+      const biome=Math.floor(c*TILE/760)%3;
+      const colors={1:r===surfaceRows[c]?['#695c53','#70605b','#745962'][biome]:'#68564f',2:['#44566a','#4a5b70','#504c66'][biome],3:'#4d6275',4:'#4b536c',5:'#806857'};
+      rect(x,y,TILE-1,TILE-1,colors[type]);
+      rect(x+2,y+2,13+noise*6,2,type===1?'#a18170':type===5?'#ae906c':'#617488');
+      if(noise>.32)rect(x+4+(noise*5|0),y+17,9+noise*5,2,'#34475a');
+      else{rect(x+6,y+12,3,3,'#647888');rect(x+17,y+19,3,2,'#334a5a');}
+      if(type===1&&r===surfaceRows[c]&&!s.placedBlocks[`${c},${r}`]){rect(x,y,TILE,5,'#7fa88e');rect(x+7,y-3,4,4,'#a9c3a0');}
+      if(type===5){rect(x+6,y+4,2,16,'#a58768');rect(x+16,y+4,2,16,'#a58768');}
+      if(type===3){rect(x+5,y+6,7,7,'#78b2bd');rect(x+16,y+14,5,5,'#9bd0cf');}
+      if(type===4){rect(x+8,y+3,7,15,'#a88fd2');rect(x+13,y+8,7,11,'#c9b9ed');}
+      const dmg=s.damage?.[`${c},${r}`];if(dmg){rect(x+3,y+11,12,2,'#1d2c40');rect(x+13,y+7,2,14,'#1d2c40');}
     }
-    for(const a of s.ladders){let x=a.c*TILE+10,y=SURFACE+a.r*TILE;
-      rect(x,y,3,32,'#c5a570');rect(x+12,y,3,32,'#c5a570');for(let j=0;j<4;j++)rect(x,y+5+j*7,15,3,'#dfc08c');}
+    for(const a of s.ladders){let x=a.c*TILE+4,y=ORIGIN+a.r*TILE;
+      rect(x,y,3,TILE,'#c5a570');rect(x+12,y,3,TILE,'#c5a570');for(let j=0;j<3;j++)rect(x,y+5+j*7,15,3,'#dfc08c');}
   }
-  function drawResources(){for(const a of s.resources){let x=a.x,y=SURFACE;
+  function drawResources(){for(const a of s.resources){let x=a.x,y=groundY(a.x);
     if(a.type==='fiber'){rect(x-3,y-28,6,28,'#699280');rect(x-12,y-36,24,15,'#a6c8a0');rect(x+4,y-45,7,16,'#7bb5a0');}
     else if(a.type==='food'){rect(x-3,y-21,6,21,'#557e69');rect(x-12,y-32,24,14,'#6ba780');rect(x-8,y-27,5,5,'#ef9b9e');rect(x+4,y-25,5,5,'#ef9b9e');}
     else if(a.type==='wood'){rect(x-6,y-42,12,42,'#8c6b5c');rect(x-14,y-53,28,22,'#779d8e');rect(x-8,y-63,18,18,'#91ba9f');rect(x-4,y-35,3,10,'#bf9680');}
     else{rect(x-13,y-20,26,20,'#70869a');rect(x-6,y-29,14,13,a.type==='metal'?'#8bd0d5':'#b8a3b8');rect(x+4,y-12,5,5,'#d2e0dc');}}
   }
-  function drawSites(){for(const a of s.sites){const info=buildings[a.kind],x=a.x-info.w/2,y=SURFACE-info.h;
+  function drawSites(){for(const a of s.sites){const info=buildings[a.kind],x=a.x-info.w/2,y=groundY(a.x)-info.h;
     if(!a.done){ctx.globalAlpha=.5;rect(x,y,info.w,info.h,'#72dad9');ctx.globalAlpha=1;
       ctx.strokeStyle='#c5f6e9';ctx.setLineDash([5,4]);ctx.strokeRect(x,y,info.w,info.h);ctx.setLineDash([]);
       const count=Object.entries(info.cost).reduce((n,[k,v])=>n+Math.min(v,a.put[k]||0),0),total=Object.values(info.cost).reduce((u,v)=>u+v,0);
@@ -424,25 +483,37 @@
     else if(a.kind==='farm'){rect(x,y+23,info.w,25,'#70605c');for(let j=0;j<6;j++){rect(x+j*16+8,y+9,4,17,'#70b992');rect(x+j*16+4,y+5,11,7,'#addd92');}}
     else{rect(x,y,info.w,info.h,'#718792');for(let j=0;j<3;j++)rect(x+6,y+9+j*27,20,15,'#9eafb1');}}
   }
-  function drawActors(){for(const a of s.allies){const y=SURFACE;rect(a.x-8,y-29,16,29,'#cfaa86');rect(a.x-8,y-36,16,10,'#8dc9c0');rect(a.x-5,y-24,10,5,'#355266');text(a.role==='guard'?'⚔':a.role==='gather'?'✦':'▣',a.x-7,y-42,12);}
-    for(const e of s.enemies){let x=e.x,y=SURFACE;rect(x-13,y-23,26,23,'#a35b88');rect(x-8,y-31,16,12,'#bf78a3');rect(x-7,y-18,4,4,'#ffe1a6');rect(x+4,y-18,4,4,'#ffe1a6');rect(x-14,y-38,28,3,'#2f2437');rect(x-14,y-38,28*e.hp/(26+s.day*4),3,'#ec7892');}
+  function drawActors(){for(const a of s.allies){const y=groundY(a.x);rect(a.x-8,y-29,16,29,'#cfaa86');rect(a.x-8,y-36,16,10,'#8dc9c0');rect(a.x-5,y-24,10,5,'#355266');text(a.role==='guard'?'⚔':a.role==='gather'?'✦':'▣',a.x-7,y-42,12);}
+    for(const e of s.enemies){let x=e.x,y=groundY(x);rect(x-13,y-23,26,23,'#a35b88');rect(x-8,y-31,16,12,'#bf78a3');rect(x-7,y-18,4,4,'#ffe1a6');rect(x+4,y-18,4,4,'#ffe1a6');rect(x-14,y-38,28,3,'#2f2437');rect(x-14,y-38,28*e.hp/(26+s.day*4),3,'#ec7892');}
     const p=s.player,x=p.x,y=p.y;
     rect(x-9,y+7,18,20,'#ceac91');rect(x-10,y,20,13,'#d9c2a6');rect(x-8,y+11,16,9,'#478399');rect(x-5,y+14,10,4,'#1c3a51');rect(x+p.facing*3,y+4,4,4,'#233249');
     rect(x-10,y+25,8,4,'#334258');rect(x+2,y+25,8,4,'#334258');
-    if(targetTile&&inReach(targetTile.c,targetTile.r)){ctx.strokeStyle='#e8d29d';ctx.lineWidth=2;ctx.strokeRect(targetTile.c*TILE+2,SURFACE+targetTile.r*TILE+2,TILE-4,TILE-4);}
-    if(mode&&buildings[mode]&&previewX!==null){const b=buildings[mode];ctx.globalAlpha=.45;rect(previewX-b.w/2,SURFACE-b.h,b.w,b.h,'#88e3dc');ctx.globalAlpha=1;}
+    if(targetTile&&inReach(targetTile.c,targetTile.r)){ctx.strokeStyle='#e8d29d';ctx.lineWidth=2;ctx.strokeRect(targetTile.c*TILE+2,ORIGIN+targetTile.r*TILE+2,TILE-4,TILE-4);}
+    if(mode&&buildings[mode]&&previewX!==null){const b=buildings[mode];ctx.globalAlpha=.45;rect(previewX-b.w/2,groundY(previewX)-b.h,b.w,b.h,'#88e3dc');ctx.globalAlpha=1;}
   }
-  function drawDarkness(){if(viewY+logicalH<SURFACE)return;
-    const p=s.player,px=p.x-viewX,py=p.y+14-viewY,depth=clamp((p.y-SURFACE)/130,0,.84);
+  function drawDarkness(){const p=s.player;if(p.y<groundY(p.x)-28)return;
+    const px=p.x-viewX,py=p.y+14-viewY,depth=clamp((p.y-groundY(p.x))/130,0,.84);
     if(depth<.1)return;
     ctx.fillStyle=`rgba(5,10,21,${depth*.78})`;ctx.fillRect(0,0,logicalW,logicalH);
-    const radius=s.upgrades.lamp?230:140;
+    const radius=s.equipped.light==='lamp'?230:140;
     const glow=ctx.createRadialGradient(px,py,12,px,py,radius);
     glow.addColorStop(0,'rgba(160,221,211,.35)');glow.addColorStop(.55,'rgba(91,159,162,.15)');glow.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=glow;ctx.fillRect(px-radius,py-radius,radius*2,radius*2);
   }
+  function drawMinimap(){const m=mapCtx,w=mapCanvas.width,h=mapCanvas.height;
+    m.fillStyle='#233f59';m.fillRect(0,0,w,h);
+    for(let c=0;c<COLS;c++){const x=c*w/COLS,y=surfaceRows[c]*1.55+16;
+      m.fillStyle='#506876';m.fillRect(x,y,Math.ceil(w/COLS)+1,h-y);
+      m.fillStyle='#a5bea5';m.fillRect(x,y,Math.ceil(w/COLS)+1,2);
+      for(const r of [surfaceRows[c]+9,surfaceRows[c]+22])if(s.terrain[r]?.[c]===0){m.fillStyle='#192a3c';m.fillRect(x,16+r*1.55,2,4);}
+    }
+    for(const site of s.sites){m.fillStyle=site.done?'#f4ce8f':'#96d6d8';m.fillRect(site.x/WORLD_W*w-1,14+surfaceRows[Math.floor(site.x/TILE)]*1.55-3,3,3);}
+    const px=s.player.x/WORLD_W*w,py=16+(s.player.y-ORIGIN)/TILE*1.55;
+    m.strokeStyle='#ffffffaa';m.strokeRect(viewX/WORLD_W*w,Math.max(0,16+(viewY-ORIGIN)/TILE*1.55),(logicalW/WORLD_W)*w,(logicalH/TILE)*1.55);
+    m.fillStyle='#0a1c29';m.fillRect(px-3,py-3,7,7);m.fillStyle='#fff0ac';m.fillRect(px-2,py-2,5,5);
+  }
   function draw(){ctx.setTransform(scale,0,0,scale,0,0);ctx.fillStyle='#142134';ctx.fillRect(0,0,logicalW,logicalH);
     ctx.save();ctx.translate(-viewX,-viewY);drawBackground();drawTerrain();drawResources();drawSites();drawActors();ctx.restore();
-    drawDarkness();if(phase()==='밤')rect(0,0,logicalW,logicalH,'#10112b22');
+    drawDarkness();if(phase()==='밤')rect(0,0,logicalW,logicalH,'#10112b22');drawMinimap();
   }
   function updateHud(){const rem=phase()==='낮'?DAY-s.time%CYCLE:CYCLE-s.time%CYCLE;
     $('clock').textContent=`${phase()==='낮'?'☀ 낮':'☾ 밤'} ${s.day}일차 · ${Math.floor(rem/60)}:${String(Math.floor(rem%60)).padStart(2,'0')} · ♥${Math.ceil(s.hp)}`;
@@ -451,7 +522,7 @@
     $('status').textContent=site?`${buildings[site.kind].name}: ${Object.entries(buildings[site.kind].cost).map(([k,n])=>`${names[k]} ${site.put[k]||0}/${n}`).join(' · ')}${supplied(site)?' · 건설 중':' · 채집으로 넣기'}`:
       mode==='ladder'?'빈 지하 칸을 터치해 사다리 설치':mode?.startsWith('place:')?`${names[mode.slice(6)]} 설치: 가까운 빈 칸 터치`:
       mode&&buildings[mode]?`${buildings[mode].name} 설계도: 지면 터치`:
-      s.player.y>SURFACE?'지하 탐험 · 조이스틱 방향으로 채굴':'설계도 작업대를 지어 새로운 설계도 제작';
+      s.player.y>groundY(s.player.x)?'지하 탐험 · 조이스틱 방향으로 채굴':'설계도 작업대를 지어 새로운 설계도 제작';
     $('cancel-mode').style.display=mode?'block':'none';
   }
   function loop(now){const dt=Math.min((now-last)/1000,.06);last=now;update(dt);draw();updateHud();requestAnimationFrame(loop);}
