@@ -1,34 +1,370 @@
-(()=>{'use strict';
-const canvas=document.querySelector('#game'),ctx=canvas.getContext('2d');const el=id=>document.getElementById(id);const W=2200;let G=420;const DAY=540,NIGHT=240,CYCLE=DAY+NIGHT;const recipes={bed:{name:'침대',cost:{stone:3,metal:2,fiber:2},w:72,h:45,work:7},farm:{name:'농장',cost:{stone:2,fiber:5},w:96,h:30,work:6},wall:{name:'방벽',cost:{stone:6,metal:3},w:35,h:85,work:8}};
-const initial=()=>({time:0,day:1,hp:100,food:4,inv:{stone:5,metal:2,fiber:3},player:{x:880,y:G-27},sites:[],allies:[],enemies:[],resources:[],kills:0});let s;try{s=JSON.parse(localStorage.getItem('alien-survival-save'))||initial()}catch{s=initial()}s.resources=s.resources||[];s.enemies=s.enemies||[];s.sites=s.sites||[];s.allies=s.allies||[];let tool='mine',speed=1,keys={},view=0,scale=1,logicalW=960,logicalH=540,last=performance.now(),spawnTick=0,actTick=0,attackTick=0,saveTick=0,toastTick=0,selectedAlly=0;
-function rand(a,b){return a+Math.random()*(b-a)}function clamp(v,a,b){return Math.max(a,Math.min(b,v))}function toast(t){el('toast').textContent=t;el('toast').classList.add('show');toastTick=3}function save(){localStorage.setItem('alien-survival-save',JSON.stringify(s));toast('진행 상황을 저장했어요')}
-function addResource(){let x=rand(95,W-95),types=['stone','stone','fiber','fiber','metal','food'];s.resources.push({x,type:types[Math.floor(rand(0,types.length))],hp:2})}while(s.resources.length<32)addResource();
-function resize(){let d=Math.min(devicePixelRatio||1,2),portrait=innerHeight>innerWidth;canvas.width=innerWidth*d;canvas.height=innerHeight*d;canvas.style.width=innerWidth+'px';canvas.style.height=innerHeight+'px';logicalH=portrait?780:Math.round(960*innerHeight/innerWidth);logicalW=portrait?Math.round(780*innerWidth/innerHeight):960;G=Math.round(logicalH*(portrait?.57:.78));scale=canvas.width/logicalW;ctx.setTransform(scale,0,0,scale,0,0);ctx.imageSmoothingEnabled=false}window.addEventListener('resize',resize);resize();
-const phase=()=>s.time%CYCLE<DAY?'낮':'밤',remaining=()=>phase()==='낮'?DAY-s.time%CYCLE:CYCLE-s.time%CYCLE;function near(x,d=72){return Math.abs(s.player.x-x)<d}function totalCost(r){return Object.entries(r.cost).map(([k,v])=>`${label(k)} ${v}`).join(' · ')}function label(k){return {stone:'광석',metal:'금속',fiber:'섬유',food:'식량'}[k]}
-function act(){let r=s.resources.filter(a=>near(a.x,62)).sort((a,b)=>Math.abs(a.x-s.player.x)-Math.abs(b.x-s.player.x))[0];let site=s.sites.filter(a=>!a.done&&near(a.x,100)).sort((a,b)=>Math.abs(a.x-s.player.x)-Math.abs(b.x-s.player.x))[0];if(site&&(!r||Math.abs(site.x-s.player.x)<Math.abs(r.x-s.player.x))){deliver(site,true);return}if(r){r.hp--;let gain=r.type;if(gain==='food')s.food++;else s.inv[gain]++;toast(`${label(gain)} +1`);if(r.hp<=0){s.resources.splice(s.resources.indexOf(r),1);setTimeout(addResource,2500)}return}toast('자원이나 건설 현장 가까이 이동하세요')}
-function deliver(site,player){let recipe=recipes[site.kind],delivered=false;for(const [k,v] of Object.entries(recipe.cost)){let need=v-(site.put[k]||0),n=Math.min(need,s.inv[k]||0,player?99:1);if(n>0){s.inv[k]-=n;site.put[k]=(site.put[k]||0)+n;delivered=true;if(!player)break}}if(delivered)toast(`${recipe.name}에 재료를 넣었어요`);else if(player)toast('필요한 재료가 부족하거나 이미 채웠어요')}
-function supplied(site){return Object.entries(recipes[site.kind].cost).every(([k,v])=>(site.put[k]||0)>=v)}function build(x,kind){let r=recipes[kind];x=clamp(x,70,W-70);if(s.sites.some(a=>Math.abs(a.x-x)<(recipes[a.kind].w+r.w)/2+12)){toast('다른 건물과 너무 가까워요');return}if(Math.abs(x-s.player.x)>310){toast('플레이어 가까이에 설계도를 놓으세요');return}s.sites.push({x,kind,put:{},progress:0,done:false});toast(`${r.name} 설계도 설치! 재료를 운반하세요`);tool='mine';renderButtons()}
-function recruit(){let beds=s.sites.filter(a=>a.done&&a.kind==='bed').length;if(s.allies.length>=beds){toast('완성된 빈 침대가 필요해요');return}if(s.food<2){toast('동료 모집에는 식량 2개가 필요해요');return}s.food-=2;s.allies.push({x:s.player.x+40,role:'haul',hp:50,work:0});toast('구조 신호에 동료가 합류했어요!')}
-function assign(){if(!s.allies.length){toast('먼저 침대와 식량으로 동료를 모집하세요');return}selectedAlly%=s.allies.length;const a=s.allies[selectedAlly];let roles=['haul','gather','guard'];a.role=roles[(roles.indexOf(a.role)+1)%3];toast(`${selectedAlly+1}번 동료: ${roleName(a.role)} (다시 누르면 변경)`)}function roleName(r){return {haul:'운반·건설',gather:'채집',guard:'경비'}[r]}
-function damageEnemy(e,d){e.hp-=d;if(e.hp<=0){s.enemies.splice(s.enemies.indexOf(e),1);s.kills++;if(Math.random()<.35){s.food++;toast('외계 생물에서 식량 +1')}}}function attack(){let e=s.enemies.filter(a=>Math.abs(a.x-s.player.x)<85).sort((a,b)=>Math.abs(a.x-s.player.x)-Math.abs(b.x-s.player.x))[0];if(e)damageEnemy(e,18);else toast('공격 범위에 적이 없어요')}
-function resetAfterDeath(){s.hp=100;s.food=Math.max(1,s.food-2);s.player.x=880;s.enemies=[];s.time=Math.floor(s.time/CYCLE)*CYCLE+90;toast('쓰러졌어요. 식량 2개를 잃고 기지에서 회복했어요')}
-function update(dt){let step=Math.min(dt,.05)*speed,safe=phase();let move=(keys.right?1:0)-(keys.left?1:0);s.player.x=clamp(s.player.x+move*170*dt,20,W-20);if(keys.act){actTick-=dt;if(actTick<=0){act();actTick=.42}}else actTick=0;if(keys.attack){attackTick-=dt;if(attackTick<=0){attack();attackTick=.38}}else attackTick=0;
-let prev=Math.floor(s.time/CYCLE);s.time+=step;if(Math.floor(s.time/CYCLE)>prev){s.day++;s.food=Math.max(0,s.food-Math.max(1,Math.ceil(s.allies.length/2)));for(let a of s.sites)if(a.done&&a.kind==='farm')s.food+=3;toast(`새로운 낮! 식량 소비 후 농장 수확 · ${s.day}일차`)}
-if(s.time%CYCLE>=DAY){spawnTick-=step;if(spawnTick<=0){spawnTick=clamp(13-s.day*.7,3,13);let x=Math.random()<.5?clamp(s.player.x-rand(430,650),25,W-25):clamp(s.player.x+rand(430,650),25,W-25);s.enemies.push({x,hp:26+s.day*4,strike:0})}}else spawnTick=0;
-for(let site of s.sites){if(site.done||!supplied(site))continue;let workers=s.allies.filter(a=>a.role==='haul'&&Math.abs(a.x-site.x)<80).length;site.progress+=step*(near(site.x,105)?1:0)+step*workers*.75;if(site.progress>=recipes[site.kind].work){site.done=true;toast(`${recipes[site.kind].name} 완성!`)}}
-for(let a of s.allies){a.work=(a.work||0)-step;let target=s.player.x;if(a.role==='haul'){let site=s.sites.find(v=>!v.done);if(site)target=site.x-18;else target=880;if(site&&Math.abs(a.x-site.x)<65&&a.work<=0&&!supplied(site)){deliver(site,false);a.work=2.2}}else if(a.role==='gather'&&safe==='낮'){let r=s.resources.filter(v=>Math.abs(v.x-a.x)<280).sort((u,v)=>Math.abs(u.x-a.x)-Math.abs(v.x-a.x))[0];if(r){target=r.x;if(Math.abs(a.x-r.x)<32&&a.work<=0){if(r.type==='food')s.food++;else s.inv[r.type]++;r.hp--;if(r.hp<=0){s.resources.splice(s.resources.indexOf(r),1);setTimeout(addResource,2400)}a.work=5}}}else if(a.role==='guard')target=880+((s.allies.indexOf(a)%3)-1)*70;if(Math.abs(target-a.x)>9)a.x+=Math.sign(target-a.x)*Math.min(Math.abs(target-a.x),80*step);let enemy=s.enemies.find(e=>Math.abs(e.x-a.x)<85);if(enemy&&a.work<=0){damageEnemy(enemy,12);a.work=.9}}
-for(let e of [...s.enemies]){e.strike-=step;let wall=s.sites.find(a=>a.done&&a.kind==='wall'&&Math.abs(a.x-e.x)<34);let target=wall?wall.x:s.player.x;e.x+=Math.sign(target-e.x)*clamp(39+s.day*2,40,90)*step;if(Math.abs(e.x-s.player.x)<26&&e.strike<=0){s.hp-=10;e.strike=1.2;if(s.hp<=0)resetAfterDeath()}if(!wall){let farm=s.sites.find(a=>a.done&&a.kind==='farm'&&Math.abs(a.x-e.x)<35);if(farm&&e.strike<=0){farm.done=false;farm.put={};farm.progress=0;e.strike=3;toast('농장이 공격받아 다시 지어야 해요')}}}
-if(s.resources.length<25&&Math.random()<step*.15)addResource();saveTick+=dt;if(saveTick>15){localStorage.setItem('alien-survival-save',JSON.stringify(s));saveTick=0}if(toastTick>0){toastTick-=dt;if(toastTick<=0)el('toast').classList.remove('show')}view=clamp(s.player.x-logicalW*.5,0,W-logicalW);}
-function rect(x,y,w,h,c){ctx.fillStyle=c;ctx.fillRect(Math.round(x),Math.round(y),Math.round(w),Math.round(h))}function text(t,x,y,color='#fff',size=13){ctx.fillStyle=color;ctx.font=`bold ${size}px monospace`;ctx.fillText(t,Math.round(x),Math.round(y))}function draw(){let night=phase()==='밤';let h=logicalH;let sky=ctx.createLinearGradient(0,0,0,G);sky.addColorStop(0,night?'#111330':'#213f62');sky.addColorStop(1,night?'#3d3157':'#8a7482');ctx.fillStyle=sky;ctx.fillRect(0,0,logicalW,h);ctx.save();ctx.translate(-view,0);
-for(let i=0;i<85;i++){let x=((i*379+73)%W),y=16+(i*73)%250;rect(x,y,i%7===0?3:2,2,night?'#cad9eb':'#9db9c5')}
-for(let i=0;i<28;i++){let x=i*94+((i*173)%31);rect(x,G-100-(i%4)*14,44,G,'#3b4862');rect(x+8,G-117-(i%4)*14,23,19,'#9f8bac')}
-rect(0,G,W,h-G,'#283546');rect(0,G,W,12,'#779d89');rect(0,G+12,W,8,'#496a6d');for(let i=0;i<160;i++){let x=(i*191)%W,y=G+28+(i*67)%Math.max(40,h-G-40);rect(x,y,5+(i%3)*3,3,i%3?'#4b5972':'#647b86')}
-for(let r of s.resources){let x=r.x;if(r.type==='food'){rect(x-3,G-22,6,22,'#5a795c');rect(x-11,G-29,22,13,'#639f70');rect(x-8,G-25,5,5,'#ef8996');rect(x+4,G-23,5,5,'#ef8996')}else if(r.type==='fiber'){rect(x-3,G-21,6,21,'#487f6b');rect(x-10,G-25,19,9,'#a2ddaa');rect(x+2,G-36,7,13,'#7cbfa1')}else{rect(x-13,G-19,26,19,r.type==='metal'?'#8ca9c5':'#6e8495');rect(x-6,G-28,13,10,r.type==='metal'?'#9be8e6':'#9c8db8');rect(x+2,G-11,5,5,'#c8dae3')}}
-for(let a of s.sites){let r=recipes[a.kind],x=a.x-r.w/2,y=G-r.h;if(!a.done){ctx.globalAlpha=.5;rect(x,y,r.w,r.h,'#7be6eb');ctx.globalAlpha=1;ctx.strokeStyle='#baf7ec';ctx.setLineDash([5,4]);ctx.strokeRect(x,y,r.w,r.h);ctx.setLineDash([]);let count=Object.entries(r.cost).reduce((n,[k,v])=>n+Math.min(v,a.put[k]||0),0),all=Object.values(r.cost).reduce((u,v)=>u+v,0);rect(x,y-12,r.w,5,'#17283c');rect(x,y-12,r.w*(count/all),5,'#e7c875');text(`${r.name} ${count}/${all}`,x,y-18,'#edf9f4',11)}else if(a.kind==='bed'){rect(x,y+16,r.w,r.h-16,'#586d80');rect(x+4,y+9,r.w-8,18,'#c7a987');rect(x+5,y+11,16,10,'#d7e1d8');rect(x,y+41,r.w,4,'#352c47')}else if(a.kind==='farm'){rect(x,y+17,r.w,13,'#684e52');for(let j=0;j<6;j++){rect(x+j*16+5,y+4,4,15,'#65bb85');rect(x+j*16+2,y,10,6,'#b2db85')}}else{rect(x,y,r.w,r.h,'#67808f');for(let j=0;j<4;j++)rect(x+3+j%2*15,y+4+Math.floor(j/2)*30,11,20,'#8aabaf')}}
-for(let a of s.allies){rect(a.x-8,G-30,16,28,'#d2a681');rect(a.x-7,G-34,14,8,'#91d4ca');rect(a.x-5,G-25,10,5,'#2b3951');text(a.role==='haul'?'▣':a.role==='gather'?'✦':'⚔',a.x-6,G-43,'#dff5e6',13)}
-for(let e of s.enemies){rect(e.x-12,G-24,24,24,'#a65885');rect(e.x-7,G-29,14,12,'#ba6b9b');rect(e.x-7,G-19,4,4,'#f2d6a4');rect(e.x+4,G-19,4,4,'#f2d6a4');rect(e.x-13,G-37,26,3,'#321c36');rect(e.x-13,G-37,26*e.hp/(26+s.day*4),3,'#e87990')}
-let p=s.player;rect(p.x-9,G-29,18,28,'#e3b895');rect(p.x-10,G-36,20,12,'#e8d4ae');rect(p.x-8,G-25,16,8,'#407b91');rect(p.x-5,G-20,10,4,'#1c364a');rect(p.x-13,G-5,10,5,'#283246');rect(p.x+3,G-5,10,5,'#283246');ctx.restore();if(night){rect(0,0,logicalW,h,'#11092736');let glow=ctx.createRadialGradient(logicalW/2,G-30,10,logicalW/2,G-30,260);glow.addColorStop(0,'#e6c39620');glow.addColorStop(1,'#00000000');ctx.fillStyle=glow;ctx.fillRect(0,0,logicalW,h)}rect(0,G+12,logicalW,3,night?'#755a84':'#98ac9d');}
-function hud(){let rem=remaining(),m=Math.floor(rem/60),sec=Math.floor(rem%60);el('clock').textContent=`${phase()==='낮'?'☀ 낮':'☾ 밤'} · ${s.day}일차  ${m}:${String(sec).padStart(2,'0')}  ♥ ${Math.max(0,Math.ceil(s.hp))}`;el('inv').textContent=`광석 ${s.inv.stone}  금속 ${s.inv.metal}  섬유 ${s.inv.fiber}  식량 ${s.food}  동료 ${s.allies.length}`;let nearby=s.sites.find(a=>!a.done&&near(a.x,110));el('status').textContent=nearby?`${recipes[nearby.kind].name}: ${Object.entries(recipes[nearby.kind].cost).map(([k,v])=>`${label(k)} ${nearby.put[k]||0}/${v}`).join(' · ')} · E로 넣기`:tool==='mine'?'자원에 가까이 가서 E 또는 ⛏':`${recipes[tool].name} 놓을 땅을 클릭`;}
-function renderButtons(){document.querySelectorAll('[data-tool]').forEach(b=>b.classList.toggle('active',b.dataset.tool===tool))}document.querySelectorAll('[data-tool]').forEach(b=>b.addEventListener('click',()=>{let t=b.dataset.tool;if(recipes[t]){tool=t;toast(`${recipes[t].name} 필요: ${totalCost(recipes[t])}`)}else if(t==='mine')tool=t;else if(t==='recruit')recruit();else if(t==='assign')assign();else if(t==='save')save();renderButtons()}));renderButtons();el('speed').onclick=()=>{speed=speed===1?10:1;el('speed').textContent=`시간 ×${speed}`;toast(speed===10?'시간을 10배로 빨리 진행합니다':'보통 속도로 돌아왔어요')};document.querySelectorAll('#touch button').forEach(b=>{let k=b.dataset.key;b.addEventListener('pointerdown',e=>{e.preventDefault();b.setPointerCapture(e.pointerId);keys[k]=true});for(let type of ['pointerup','pointercancel','lostpointercapture'])b.addEventListener(type,()=>keys[k]=false)});window.addEventListener('keydown',e=>{if(['a','ArrowLeft'].includes(e.key))keys.left=true;if(['d','ArrowRight'].includes(e.key))keys.right=true;if(e.key.toLowerCase()==='e')keys.act=true;if(e.key.toLowerCase()==='f')keys.attack=true});window.addEventListener('keyup',e=>{if(['a','ArrowLeft'].includes(e.key))keys.left=false;if(['d','ArrowRight'].includes(e.key))keys.right=false;if(e.key.toLowerCase()==='e')keys.act=false;if(e.key.toLowerCase()==='f')keys.attack=false});canvas.addEventListener('pointerdown',e=>{if(!recipes[tool])return;let x=(e.clientX*canvas.width/innerWidth)/scale+view;build(x,tool)});
-function loop(now){let dt=(now-last)/1000;last=now;update(Math.min(dt,.1));ctx.setTransform(scale,0,0,scale,0,0);draw();hud();requestAnimationFrame(loop)}requestAnimationFrame(loop);
+(() => {
+  'use strict';
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const $ = id => document.getElementById(id);
+  const WORLD_W = 2304, SURFACE = 340, TILE = 32, COLS = WORLD_W / TILE, ROWS = 26;
+  const WORLD_H = SURFACE + ROWS * TILE;
+  const DAY = 540, NIGHT = 240, CYCLE = DAY + NIGHT;
+  const names = { stone:'암석', metal:'금속', fiber:'섬유', crystal:'발광 수정', food:'식량', medkit:'회복약', ladder:'사다리' };
+  const buildings = {
+    workshop:{ name:'제작소', icon:'⚙', cost:{stone:4,metal:2,fiber:2}, w:92,h:82,work:8 },
+    bed:{ name:'침대', icon:'▤', cost:{stone:3,metal:2,fiber:2}, w:70,h:43,work:6 },
+    farm:{ name:'재배실', icon:'✿', cost:{stone:2,fiber:5}, w:100,h:48,work:7 },
+    wall:{ name:'방벽', icon:'▣', cost:{stone:6,metal:3}, w:32,h:90,work:8 }
+  };
+  const crafts = {
+    pickaxe:{name:'강화 곡괭이',description:'땅과 광물을 더 빠르게 캡니다',cost:{stone:4,metal:3,crystal:1}},
+    sword:{name:'강화 무기',description:'공격 피해가 증가합니다',cost:{metal:4,fiber:2,crystal:1}},
+    lamp:{name:'탐사 등불',description:'지하를 더 넓게 비춥니다',cost:{metal:2,crystal:1}},
+    ladder:{name:'사다리 ×4',description:'빈 공간을 터치해 설치하고 올라갑니다',cost:{stone:1,fiber:2}},
+    medkit:{name:'회복약',description:'가방에서 사용하면 체력 35 회복',cost:{fiber:3,food:2}}
+  };
+  const initial = () => ({version:2,time:0,day:1,hp:100,food:4,
+    inv:{stone:5,metal:2,fiber:3,crystal:0,ladder:0,medkit:0},
+    upgrades:{pickaxe:false,sword:false,lamp:false},
+    player:{x:880,y:SURFACE-28,vy:0,facing:1},sites:[],allies:[],enemies:[],resources:[],
+    terrain:null,ladders:[],kills:0});
+  let s;
+  try { s = JSON.parse(localStorage.getItem('alien-survival-save')) || initial(); } catch { s = initial(); }
+  if (s.version !== 2) {
+    const old = s, fresh = initial();
+    fresh.time = old.time || 0; fresh.day = old.day || 1; fresh.hp = old.hp || 100;
+    fresh.food = old.food ?? 4; fresh.inv = {...fresh.inv,...old.inv};
+    fresh.player.x = old.player?.x ?? 880;
+    fresh.sites = (old.sites || []).filter(a => buildings[a.kind]);
+    fresh.allies = old.allies || []; fresh.kills = old.kills || 0;
+    s = fresh;
+  }
+  s.inv = {...initial().inv,...s.inv};
+  s.upgrades = {...initial().upgrades,...s.upgrades};
+  s.player = {...initial().player,...s.player};
+  s.sites ||= []; s.allies ||= []; s.resources ||= []; s.enemies ||= []; s.ladders ||= [];
+  const hash = (x,y) => { let n = Math.imul(x+173,374761393)^Math.imul(y+71,668265263); n=Math.imul(n^(n>>>13),1274126177); return ((n^(n>>>16))>>>0)/4294967295; };
+  function makeTerrain() {
+    return Array.from({length:ROWS},(_,r)=>Array.from({length:COLS},(_,c)=>{
+      if (r===0) return 1;
+      const cave = hash(Math.floor(c/3),Math.floor(r/3))*0.53 + hash(c,r)*0.47;
+      if (r>2 && cave > 0.72) return 0;
+      const ore = hash(c+141,r+19);
+      if (r>3 && ore>.975) return 4;
+      if (r>1 && ore>.91) return 3;
+      return r<3 && ore<.52 ? 1 : 2;
+    }));
+  }
+  if (!s.terrain || s.terrain.length!==ROWS) s.terrain = makeTerrain();
+  const random=(a,b)=>a+Math.random()*(b-a);
+  const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
+  function addResource() {
+    const types=['stone','stone','fiber','fiber','food','food','metal'];
+    s.resources.push({x:random(56,WORLD_W-56),type:types[Math.floor(random(0,types.length))],hp:2});
+  }
+  while (s.resources.length < 35) addResource();
+
+  let logicalW=420,logicalH=780,scale=1,viewX=0,viewY=0;
+  let speed=1,mode=null,targetTile=null,previewX=null;
+  let last=performance.now(),mineCooldown=0,attackCooldown=0,spawnCooldown=0,saveClock=0,toastClock=0;
+  let joystick={x:0,y:0,pointer:null},held={mine:false,attack:false};
+  function resize() {
+    const d=Math.min(devicePixelRatio||1,2),portrait=innerHeight>innerWidth;
+    canvas.width=Math.round(innerWidth*d);canvas.height=Math.round(innerHeight*d);
+    logicalH=portrait?780:Math.round(960*innerHeight/innerWidth);
+    logicalW=portrait?Math.round(780*innerWidth/innerHeight):960;
+    scale=canvas.width/logicalW; ctx.imageSmoothingEnabled=false;
+  }
+  addEventListener('resize',resize);resize();
+  function flash(message) { $('toast').textContent=message;$('toast').classList.add('show');toastClock=3; }
+  function save(silent=false) { localStorage.setItem('alien-survival-save',JSON.stringify(s));if(!silent) flash('게임을 저장했어요'); }
+  const phase=()=>s.time%CYCLE<DAY?'낮':'밤';
+  const nearSurface=()=>s.player.y<SURFACE+45;
+  const nearSite=(site,radius=115)=>nearSurface()&&Math.abs(s.player.x-site.x)<radius;
+  const costText=cost=>Object.entries(cost).map(([k,n])=>`${names[k]} ${n}`).join(' · ');
+  const canPay=cost=>Object.entries(cost).every(([k,n])=>(k==='food'?s.food:s.inv[k]||0)>=n);
+  function pay(cost){for(const [k,n] of Object.entries(cost)){if(k==='food')s.food-=n;else s.inv[k]-=n;}}
+  const workshopReady=()=>s.sites.some(a=>a.kind==='workshop'&&a.done&&nearSite(a,135));
+
+  function tileAt(c,r){return r<0?0:r>=ROWS||c<0||c>=COLS?2:s.terrain[r][c];}
+  function solidPoint(x,y){if(y<SURFACE)return false;return tileAt(Math.floor(x/TILE),Math.floor((y-SURFACE)/TILE))!==0;}
+  function blocked(x,y){return solidPoint(x-8,y+2)||solidPoint(x+8,y+2)||solidPoint(x-8,y+27)||solidPoint(x+8,y+27);}
+  function moveAxis(amount,axis){const p=s.player,n=Math.ceil(Math.abs(amount)/4),unit=amount/n;if(!n)return false;for(let i=0;i<n;i++){
+    const nx=axis==='x'?p.x+unit:p.x,ny=axis==='y'?p.y+unit:p.y;
+    if(blocked(nx,ny))return true;
+    p.x=clamp(nx,10,WORLD_W-10);p.y=clamp(ny,-80,WORLD_H-29);
+  }return false;}
+  function grounded(){return blocked(s.player.x,s.player.y+2);}
+  function jump(){if(grounded()){s.player.vy=-332;flash('점프!');}}
+  function inReach(c,r){const x=c*TILE+TILE/2,y=SURFACE+r*TILE+TILE/2;
+    return Math.hypot(x-s.player.x,y-(s.player.y+16))<98;}
+  function selectDigTile(){
+    if(targetTile&&inReach(targetTile.c,targetTile.r)&&tileAt(targetTile.c,targetTile.r))return targetTile;
+    const p=s.player,down=joystick.y>.37,up=joystick.y<-.55;
+    const choices=down?[[p.x,p.y+43],[p.x+p.facing*26,p.y+44]]:
+      up?[[p.x,p.y-17],[p.x+p.facing*30,p.y+2]]:
+      [[p.x+p.facing*30,p.y+17],[p.x+p.facing*28,p.y+32],[p.x,p.y+43]];
+    for(const [x,y] of choices){let c=Math.floor(x/TILE),r=Math.floor((y-SURFACE)/TILE);
+      if(tileAt(c,r)&&inReach(c,r))return {c,r};}
+    return null;
+  }
+  function dig(c,r){const type=tileAt(c,r);if(!type||!inReach(c,r))return false;
+    const key=`${c},${r}`;s.damage ||= {};s.damage[key]=(s.damage[key]||0)+(s.upgrades.pickaxe?2:1);
+    const hp=type===1?1:type===2?2:3;
+    if(s.damage[key]>=hp){s.terrain[r][c]=0;delete s.damage[key];const gain=type===3?'metal':type===4?'crystal':'stone';s.inv[gain]++;flash(`${names[gain]} +1`);targetTile=null;}
+    else flash('광물을 캐는 중…');
+    return true;
+  }
+  function collect(resource){resource.hp--;const k=resource.type;
+    if(k==='food')s.food++;else s.inv[k]++;
+    flash(`${names[k]} +1`);
+    if(resource.hp<=0){s.resources.splice(s.resources.indexOf(resource),1);setTimeout(addResource,3500);}
+  }
+  function supplied(site){return Object.entries(buildings[site.kind].cost).every(([k,n])=>(site.put[k]||0)>=n);}
+  function deliver(site,player){let moved=false;
+    for(const [k,n] of Object.entries(buildings[site.kind].cost)){
+      const qty=Math.min(n-(site.put[k]||0),s.inv[k]||0,player?99:1);
+      if(qty>0){s.inv[k]-=qty;site.put[k]=(site.put[k]||0)+qty;moved=true;if(!player)break;}
+    }
+    if(moved)flash(`${buildings[site.kind].name}에 재료 투입`);
+    else if(player)flash('부족한 재료는 가방에서 확인하세요');
+  }
+  function mine(){
+    const p=s.player;
+    if(nearSurface()&&joystick.y<.35){
+      const site=s.sites.filter(a=>!a.done&&nearSite(a,85)&&!supplied(a)).sort((a,b)=>Math.abs(a.x-p.x)-Math.abs(b.x-p.x))[0];
+      if(site){deliver(site,true);return;}
+      const resource=s.resources.filter(a=>Math.abs(a.x-p.x)<48).sort((a,b)=>Math.abs(a.x-p.x)-Math.abs(b.x-p.x))[0];
+      if(resource){collect(resource);return;}
+    }
+    const tile=selectDigTile();if(tile&&dig(tile.c,tile.r))return;
+    flash('땅이나 자원 가까이 이동하세요');
+  }
+  function damageEnemy(enemy,amount){enemy.hp-=amount;if(enemy.hp<=0){s.enemies.splice(s.enemies.indexOf(enemy),1);s.kills++;if(Math.random()<.35){s.food++;flash('식량 +1');}}}
+  function attack(){const p=s.player,enemy=s.enemies.filter(e=>Math.abs(e.x-p.x)<77&&Math.abs((SURFACE-25)-(p.y+14))<74).sort((a,b)=>Math.abs(a.x-p.x)-Math.abs(b.x-p.x))[0];
+    if(enemy)damageEnemy(enemy,s.upgrades.sword?30:18);else flash('공격 범위에 적이 없어요');}
+  function build(x,kind){if(!nearSurface()){flash('건물은 지상에 설치할 수 있어요');return;}
+    const info=buildings[kind];x=clamp(x,50,WORLD_W-50);
+    if(Math.abs(s.player.x-x)>190){flash('가까운 지면에 설계도를 놓으세요');return;}
+    for(let c=Math.floor((x-info.w/2)/TILE);c<=Math.floor((x+info.w/2)/TILE);c++)if(!tileAt(c,0)){flash('파낸 땅 위에는 건물을 놓을 수 없어요');return;}
+    if(s.sites.some(a=>Math.abs(a.x-x)<(buildings[a.kind].w+info.w)/2+13)){flash('건물 사이의 간격이 부족해요');return;}
+    s.sites.push({x,kind,put:{},progress:0,done:false});mode=null;previewX=null;
+    flash(`${info.name} 설계도 설치! 채집 버튼으로 재료를 넣으세요`);
+  }
+  function craft(kind){const recipe=crafts[kind];if(!workshopReady()){flash('완성된 제작소 가까이에서 제작하세요');return;}
+    if(['pickaxe','sword','lamp'].includes(kind)&&s.upgrades[kind]){flash('이미 제작한 장비예요');return;}
+    if(!canPay(recipe.cost)){flash('제작 재료가 부족해요');return;}
+    pay(recipe.cost);
+    if(['pickaxe','sword','lamp'].includes(kind))s.upgrades[kind]=true;
+    else s.inv[kind]+=kind==='ladder'?4:1;
+    flash(`${recipe.name} 제작 완료`);showCraft();
+  }
+  function recruit(){const beds=s.sites.filter(a=>a.kind==='bed'&&a.done).length;
+    if(s.allies.length>=beds){flash('완성된 빈 침대가 필요해요');return;}
+    if(s.food<2){flash('식량 2개가 필요해요');return;}
+    s.food-=2;s.allies.push({x:s.player.x+40,role:'haul',work:0});flash('새 동료가 합류했어요');showAllies();
+  }
+  function useMedkit(){if(!s.inv.medkit||s.hp>=100)return;s.inv.medkit--;s.hp=Math.min(100,s.hp+35);flash('체력 35 회복');showBag();}
+  function beginLadder(){if(!s.inv.ladder){flash('사다리가 없어요');return;}mode='ladder';hideModal();flash('근처 지하 빈 칸을 터치해 사다리를 설치하세요');}
+  function placeLadder(c,r){if(r<0||tileAt(c,r)||!inReach(c,r)){flash('가까운 지하 빈 칸을 터치하세요');return;}
+    if(s.ladders.some(a=>a.c===c&&a.r===r)){flash('이미 사다리가 있어요');return;}
+    s.ladders.push({c,r});s.inv.ladder--;mode=s.inv.ladder?'ladder':null;flash('사다리 설치 완료');}
+
+  function showModal(title,html){$('modal-title').textContent=title;$('modal-body').innerHTML=html;$('overlay').classList.add('open');}
+  function hideModal(){$('overlay').classList.remove('open');}
+  const slot=(symbol,label,count)=>`<div class="slot"><strong>${symbol}</strong>${label}<br><b>×${count}</b></div>`;
+  function showBag(){showModal('🎒 가방',`<div class="grid">
+    ${slot('▧','암석',s.inv.stone)}${slot('⬡','금속',s.inv.metal)}${slot('❀','섬유',s.inv.fiber)}
+    ${slot('✦','발광 수정',s.inv.crystal)}${slot('◉','식량',s.food)}${slot('⚕','회복약',s.inv.medkit)}
+    ${slot('╫','사다리',s.inv.ladder)}${slot('⛏','곡괭이',s.upgrades.pickaxe?'강화':'기본')}${slot('⚔','무기',s.upgrades.sword?'강화':'기본')}
+    </div><h3>사용하기</h3><div class="recipe"><div>⚕ 회복약 <small>체력 +35</small></div><button data-use="medkit" ${!s.inv.medkit||s.hp>=100?'disabled':''}>사용</button></div>
+    <div class="recipe"><div>╫ 사다리 <small>지하에 설치한 뒤 조이스틱을 위로 밀어 올라가기</small></div><button data-use="ladder" ${!s.inv.ladder?'disabled':''}>배치</button></div>
+    <p class="hint">자원은 가방에 모입니다. 제작소를 완성하면 새로운 도구와 아이템을 만들 수 있어요.</p>`);}
+  function showBuild(){showModal('▣ 설계도',`<p class="hint">설계도 선택 → 지상 빈 곳 터치 → 채집 버튼으로 재료 넣기 → 건설</p>
+    ${Object.entries(buildings).map(([kind,b])=>`<div class="recipe"><div><b>${b.icon} ${b.name}</b><small>${costText(b.cost)}</small></div><button data-build="${kind}">선택</button></div>`).join('')}`);}
+  function showCraft(){const ready=workshopReady(),exists=s.sites.some(a=>a.kind==='workshop'&&a.done);
+    showModal('⚙ 제작',`<p class="hint">${ready?'제작소에서 제작할 수 있어요.':exists?'완성된 제작소 가까이 이동하세요.':'먼저 설계도에서 제작소를 설치하고 재료를 넣어 완성하세요.'}</p>
+    ${Object.entries(crafts).map(([key,r])=>{const owned=['pickaxe','sword','lamp'].includes(key)&&s.upgrades[key];return `<div class="recipe"><div><b>${r.name}</b><small>${r.description}<br>${costText(r.cost)}</small></div><button data-craft="${key}" ${!ready||owned||!canPay(r.cost)?'disabled':''}>${owned?'보유':'제작'}</button></div>`;}).join('')}
+    ${!exists?'<button data-build="workshop">제작소 설계도 선택</button>':''}`);}
+  const roleName={haul:'운반·건설',gather:'채집',guard:'경비'};
+  function showAllies(){showModal('✦ 동료',`<p class="hint">완성된 침대 하나당 동료 한 명을 모집할 수 있어요. 모집 비용은 식량 2개입니다.</p>
+    <div class="recipe"><div>동료 ${s.allies.length}명 · 완성 침대 ${s.sites.filter(a=>a.kind==='bed'&&a.done).length}개</div><button data-recruit="1">모집</button></div>
+    ${s.allies.map((a,i)=>`<div class="recipe"><div><b>${i+1}번 동료</b><small>${roleName[a.role]||'운반·건설'}</small></div><button data-role="${i}">역할 변경</button></div>`).join('')}`);}
+  $('modal-body').addEventListener('click',e=>{
+    const b=e.target.closest('button');if(!b||b.disabled)return;
+    if(b.dataset.build){mode=b.dataset.build;hideModal();flash(`${buildings[mode].name} 설계도: 지상의 빈 곳을 터치하세요`);}
+    if(b.dataset.craft)craft(b.dataset.craft);
+    if(b.dataset.use==='medkit')useMedkit();
+    if(b.dataset.use==='ladder')beginLadder();
+    if(b.dataset.recruit)recruit();
+    if(b.dataset.role){let a=s.allies[Number(b.dataset.role)],roles=['haul','gather','guard'];a.role=roles[(roles.indexOf(a.role)+1)%3];showAllies();flash(`동료 역할: ${roleName[a.role]}`);}
+  });
+  $('close').onclick=hideModal;$('overlay').addEventListener('pointerdown',e=>{if(e.target===$('overlay'))hideModal();});
+  $('bag').onclick=showBag;$('build').onclick=showBuild;$('craft').onclick=showCraft;$('allies').onclick=showAllies;
+  $('save').onclick=()=>save();$('speed').onclick=()=>{speed=speed===1?10:1;$('speed').textContent=`×${speed}`;flash(`시간 속도 ×${speed}`);};
+  const joy=$('joystick'),stick=$('stick');
+  function updateJoystick(e){const box=joy.getBoundingClientRect(),cx=box.left+box.width/2,cy=box.top+box.height/2;
+    let dx=(e.clientX-cx)/(box.width*.34),dy=(e.clientY-cy)/(box.height*.34),mag=Math.hypot(dx,dy);
+    if(mag>1){dx/=mag;dy/=mag;}joystick.x=dx;joystick.y=dy;
+    stick.style.transform=`translate(${dx*box.width*.31}px,${dy*box.height*.31}px)`;}
+  joy.addEventListener('pointerdown',e=>{e.preventDefault();joy.setPointerCapture(e.pointerId);joystick.pointer=e.pointerId;updateJoystick(e);});
+  joy.addEventListener('pointermove',e=>{if(e.pointerId===joystick.pointer)updateJoystick(e);});
+  const releaseJoy=e=>{if(e.pointerId!==joystick.pointer)return;joystick={x:0,y:0,pointer:null};stick.style.transform='translate(0,0)';};
+  for(const type of ['pointerup','pointercancel','lostpointercapture'])joy.addEventListener(type,releaseJoy);
+  function holdButton(id,key,action){const b=$(id);b.addEventListener('pointerdown',e=>{e.preventDefault();b.setPointerCapture(e.pointerId);held[key]=true;action();});
+    for(const type of ['pointerup','pointercancel','lostpointercapture'])b.addEventListener(type,()=>held[key]=false);}
+  holdButton('mine','mine',()=>{mineCooldown=.28;mine();});
+  holdButton('attack','attack',()=>{attackCooldown=.39;attack();});
+  $('jump').addEventListener('pointerdown',e=>{e.preventDefault();jump();});
+  const keyboard={left:false,right:false,down:false,up:false};
+  addEventListener('keydown',e=>{if(['a','ArrowLeft'].includes(e.key))keyboard.left=true;
+    if(['d','ArrowRight'].includes(e.key))keyboard.right=true;
+    if(['s','ArrowDown'].includes(e.key)){keyboard.down=true;joystick.y=1;}
+    if(['w','ArrowUp'].includes(e.key))keyboard.up=true;
+    if(e.code==='Space'&&!e.repeat){e.preventDefault();jump();}
+    if(e.key.toLowerCase()==='e'&&!e.repeat)mine();
+    if(e.key.toLowerCase()==='f'&&!e.repeat)attack();
+    if(e.key.toLowerCase()==='i'&&!e.repeat)showBag();});
+  addEventListener('keyup',e=>{if(['a','ArrowLeft'].includes(e.key))keyboard.left=false;
+    if(['d','ArrowRight'].includes(e.key))keyboard.right=false;
+    if(['s','ArrowDown'].includes(e.key)){keyboard.down=false;joystick.y=0;}
+    if(['w','ArrowUp'].includes(e.key))keyboard.up=false;});
+  function eventWorld(e){const bounds=canvas.getBoundingClientRect();return {x:(e.clientX-bounds.left)*logicalW/bounds.width+viewX,y:(e.clientY-bounds.top)*logicalH/bounds.height+viewY};}
+  canvas.addEventListener('pointermove',e=>{if(mode&&mode!=='ladder')previewX=eventWorld(e).x;});
+  canvas.addEventListener('pointerdown',e=>{e.preventDefault();const p=eventWorld(e),c=Math.floor(p.x/TILE),r=Math.floor((p.y-SURFACE)/TILE);
+    if(mode==='ladder'){placeLadder(c,r);return;}
+    if(mode&&buildings[mode]){if(Math.abs(p.y-SURFACE)>110)flash('지상의 평평한 곳을 터치하세요');else build(p.x,mode);return;}
+    if(r>=0&&tileAt(c,r)&&inReach(c,r)){targetTile={c,r};flash('선택한 땅을 채집 버튼으로 파세요');}
+    else targetTile=null;
+  });
+
+  function update(dt){const p=s.player,gameDt=Math.min(dt,.05)*speed;
+    let move=clamp(joystick.x+(keyboard.right?1:0)-(keyboard.left?1:0),-1,1);
+    if(Math.abs(move)<.12)move=0;if(move)p.facing=Math.sign(move);
+    moveAxis(move*154*dt,'x');
+    const ladder=s.ladders.some(a=>Math.abs((a.c+.5)*TILE-p.x)<19&&Math.abs(SURFACE+(a.r+.5)*TILE-(p.y+14))<34);
+    if(ladder&&(joystick.y<-.25||keyboard.up)){p.vy=0;moveAxis(-105*dt,'y');}
+    else{p.vy=clamp(p.vy+710*dt,-380,370);if(moveAxis(p.vy*dt,'y'))p.vy=0;}
+    if(held.mine){mineCooldown-=dt;if(mineCooldown<=0){mine();mineCooldown=.28;}}
+    if(held.attack){attackCooldown-=dt;if(attackCooldown<=0){attack();attackCooldown=.39;}}
+    const prev=Math.floor(s.time/CYCLE);s.time+=gameDt;
+    if(Math.floor(s.time/CYCLE)>prev){s.day++;
+      s.food=Math.max(0,s.food-Math.max(1,Math.ceil(s.allies.length/2)));
+      for(const site of s.sites)if(site.done&&site.kind==='farm')s.food+=3;
+      flash(`${s.day}일차 낮 · 식량 소비와 재배실 수확`);}
+    if(phase()==='밤'){spawnCooldown-=gameDt;if(spawnCooldown<=0){spawnCooldown=clamp(13-s.day*.65,3,13);
+      let center=nearSurface()?p.x:880;
+      let x=Math.random()<.5?clamp(center-random(400,590),20,WORLD_W-20):clamp(center+random(400,590),20,WORLD_W-20);
+      s.enemies.push({x,hp:26+s.day*4,strike:0});}}
+    else spawnCooldown=0;
+    for(const site of s.sites){if(site.done||!supplied(site))continue;
+      const workers=s.allies.filter(a=>a.role==='haul'&&Math.abs(a.x-site.x)<80).length;
+      site.progress+=gameDt*((nearSite(site,115)?1:0)+workers*.7);
+      if(site.progress>=buildings[site.kind].work){site.done=true;flash(`${buildings[site.kind].name} 완성!`);}}
+    for(const a of s.allies){a.work=(a.work||0)-gameDt;let destination=880;
+      if(a.role==='haul'){const site=s.sites.find(t=>!t.done);if(site){destination=site.x-24;
+        if(Math.abs(a.x-site.x)<70&&a.work<=0&&!supplied(site)){deliver(site,false);a.work=2;}}}
+      else if(a.role==='gather'&&phase()==='낮'){let resource=s.resources.filter(t=>Math.abs(t.x-a.x)<230).sort((u,v)=>Math.abs(u.x-a.x)-Math.abs(v.x-a.x))[0];
+        if(resource){destination=resource.x;if(Math.abs(a.x-resource.x)<27&&a.work<=0){collect(resource);a.work=4;}}}
+      else if(a.role==='guard')destination=880+(s.allies.indexOf(a)%3-1)*70;
+      a.x+=Math.sign(destination-a.x)*Math.min(Math.abs(destination-a.x),78*gameDt);
+      const enemy=s.enemies.find(e=>Math.abs(e.x-a.x)<70);
+      if(enemy&&a.work<=0){damageEnemy(enemy,12);a.work=1;}
+    }
+    for(const enemy of [...s.enemies]){enemy.strike-=gameDt;
+      const wall=s.sites.find(a=>a.done&&a.kind==='wall'&&Math.abs(a.x-enemy.x)<33);
+      const tx=wall?wall.x:(nearSurface()?p.x:880);
+      enemy.x+=Math.sign(tx-enemy.x)*clamp(40+s.day*2,40,87)*gameDt;
+      if(nearSurface()&&Math.abs(enemy.x-p.x)<26&&enemy.strike<=0){s.hp-=10;enemy.strike=1.2;
+        if(s.hp<=0){s.hp=100;s.food=Math.max(1,s.food-2);p.x=880;p.y=SURFACE-28;p.vy=0;s.enemies=[];flash('쓰러졌어요. 기지에서 회복했어요');break;}}
+    }
+    if(s.resources.length<27&&Math.random()<gameDt*.3)addResource();
+    saveClock+=dt;if(saveClock>12){save(true);saveClock=0;}
+    if(toastClock>0){toastClock-=dt;if(toastClock<=0)$('toast').classList.remove('show');}
+    viewX=clamp(p.x-logicalW*.5,0,WORLD_W-logicalW);
+    viewY=clamp(p.y-logicalH*.44,0,WORLD_H-logicalH);
+  }
+
+  function rect(x,y,w,h,color){ctx.fillStyle=color;ctx.fillRect(Math.round(x),Math.round(y),Math.round(w),Math.round(h));}
+  function text(str,x,y,size=12,color='#edf5ea'){ctx.font=`bold ${size}px monospace`;ctx.fillStyle=color;ctx.fillText(str,Math.round(x),Math.round(y));}
+  function drawBackground(){const night=phase()==='밤';let sky=ctx.createLinearGradient(0,0,0,SURFACE);
+    sky.addColorStop(0,night?'#111c3b':'#2c5371');sky.addColorStop(1,night?'#494063':'#a08080');
+    ctx.fillStyle=sky;ctx.fillRect(0,-100,WORLD_W,SURFACE+100);
+    rect(0,SURFACE,WORLD_W,WORLD_H-SURFACE,'#192837');
+    for(let i=0;i<170;i++){const x=(i*373+83)%WORLD_W,y=11+(i*79)%280;
+      rect(x,y,i%8===0?3:2,2,night?'#c6def0':'#9cbfc8');}
+    rect(1650,35,65,65,night?'#b6a4b7':'#d0bfa2');
+    rect(1662,44,18,13,night?'#817897':'#aaa08e');
+    for(let i=0;i<31;i++){let x=i*84+(i*17)%40;
+      rect(x,SURFACE-112-i%4*13,48,112+i%4*13,night?'#323d5c':'#4a6577');
+      rect(x+7,SURFACE-128-i%4*13,29,19,night?'#647085':'#9b98a1');}
+    for(let i=0;i<25;i++){let x=i*101+13;
+      rect(x+19,SURFACE-64,6,64,'#4d5d6c');
+      rect(x,SURFACE-79,44,22,i%3===0?'#9a628d':'#7b9c98');
+      rect(x+9,SURFACE-89,27,14,i%3===0?'#be8ca8':'#99b8ae');
+      rect(x+11,SURFACE-75,4,3,'#dce1c0');rect(x+29,SURFACE-73,4,3,'#dce1c0');}
+  }
+  function drawTerrain(){const left=Math.max(0,Math.floor(viewX/TILE)-1),right=Math.min(COLS-1,Math.ceil((viewX+logicalW)/TILE)+1);
+    const top=Math.max(0,Math.floor((viewY-SURFACE)/TILE)-1),bottom=Math.min(ROWS-1,Math.ceil((viewY+logicalH-SURFACE)/TILE)+1);
+    for(let r=top;r<=bottom;r++)for(let c=left;c<=right;c++){
+      const type=tileAt(c,r),x=c*TILE,y=SURFACE+r*TILE,noise=hash(c,r);
+      if(type===0){rect(x,y,TILE,TILE,'#1a2b38');if(noise>.68)rect(x+5,y+6,3,3,'#47666d');continue;}
+      const colors={1:r===0?'#536b64':'#4c5e67',2:'#44566a',3:'#4d6275',4:'#4b536c'};
+      rect(x,y,31,31,colors[type]);
+      rect(x+2,y+2,27,3,type===1?'#748d79':'#617488');
+      rect(x+3,y+23,22,3,'#334558');
+      if(type===1&&r===0){rect(x,y,32,7,'#7fa88e');rect(x+7,y-3,4,4,'#a9c3a0');}
+      if(type===3){rect(x+6,y+7,8,9,'#78b2bd');rect(x+20,y+18,6,6,'#9bd0cf');}
+      if(type===4){rect(x+11,y+3,9,21,'#a88fd2');rect(x+16,y+9,7,13,'#c9b9ed');rect(x+6,y+16,5,10,'#7d94c5');}
+      if(noise>.75&&type<3)rect(x+22,y+10,3,3,'#a195a1');
+      const dmg=s.damage?.[`${c},${r}`];if(dmg){rect(x+3,y+14,15,2,'#1d2c40');rect(x+15,y+8,2,19,'#1d2c40');}
+    }
+    for(const a of s.ladders){let x=a.c*TILE+10,y=SURFACE+a.r*TILE;
+      rect(x,y,3,32,'#c5a570');rect(x+12,y,3,32,'#c5a570');for(let j=0;j<4;j++)rect(x,y+5+j*7,15,3,'#dfc08c');}
+  }
+  function drawResources(){for(const a of s.resources){let x=a.x,y=SURFACE;
+    if(a.type==='fiber'){rect(x-3,y-28,6,28,'#699280');rect(x-12,y-36,24,15,'#a6c8a0');rect(x+4,y-45,7,16,'#7bb5a0');}
+    else if(a.type==='food'){rect(x-3,y-21,6,21,'#557e69');rect(x-12,y-32,24,14,'#6ba780');rect(x-8,y-27,5,5,'#ef9b9e');rect(x+4,y-25,5,5,'#ef9b9e');}
+    else{rect(x-13,y-20,26,20,'#70869a');rect(x-6,y-29,14,13,a.type==='metal'?'#8bd0d5':'#b8a3b8');rect(x+4,y-12,5,5,'#d2e0dc');}}
+  }
+  function drawSites(){for(const a of s.sites){const info=buildings[a.kind],x=a.x-info.w/2,y=SURFACE-info.h;
+    if(!a.done){ctx.globalAlpha=.5;rect(x,y,info.w,info.h,'#72dad9');ctx.globalAlpha=1;
+      ctx.strokeStyle='#c5f6e9';ctx.setLineDash([5,4]);ctx.strokeRect(x,y,info.w,info.h);ctx.setLineDash([]);
+      const count=Object.entries(info.cost).reduce((n,[k,v])=>n+Math.min(v,a.put[k]||0),0),total=Object.values(info.cost).reduce((u,v)=>u+v,0);
+      rect(x,y-12,info.w,6,'#18283b');rect(x,y-12,info.w*(count/total),6,'#e4c17c');
+      text(`${info.name} ${count}/${total}`,x,y-19,11);
+    }else if(a.kind==='workshop'){rect(x,y+18,info.w,info.h-18,'#4e6574');rect(x+5,y+5,info.w-10,19,'#92b9b1');
+      rect(x+10,y+31,29,26,'#243c52');rect(x+47,y+34,31,19,'#deba80');rect(x+55,y+40,15,6,'#7bbec0');text('⚙',x+34,y+15,17,'#dcecc4');}
+    else if(a.kind==='bed'){rect(x,y+17,info.w,info.h-17,'#657889');rect(x+5,y+11,info.w-10,17,'#caa883');rect(x+7,y+13,16,10,'#dee2cc');}
+    else if(a.kind==='farm'){rect(x,y+23,info.w,25,'#70605c');for(let j=0;j<6;j++){rect(x+j*16+8,y+9,4,17,'#70b992');rect(x+j*16+4,y+5,11,7,'#addd92');}}
+    else{rect(x,y,info.w,info.h,'#718792');for(let j=0;j<3;j++)rect(x+6,y+9+j*27,20,15,'#9eafb1');}}
+  }
+  function drawActors(){for(const a of s.allies){const y=SURFACE;rect(a.x-8,y-29,16,29,'#cfaa86');rect(a.x-8,y-36,16,10,'#8dc9c0');rect(a.x-5,y-24,10,5,'#355266');text(a.role==='guard'?'⚔':a.role==='gather'?'✦':'▣',a.x-7,y-42,12);}
+    for(const e of s.enemies){let x=e.x,y=SURFACE;rect(x-13,y-23,26,23,'#a35b88');rect(x-8,y-31,16,12,'#bf78a3');rect(x-7,y-18,4,4,'#ffe1a6');rect(x+4,y-18,4,4,'#ffe1a6');rect(x-14,y-38,28,3,'#2f2437');rect(x-14,y-38,28*e.hp/(26+s.day*4),3,'#ec7892');}
+    const p=s.player,x=p.x,y=p.y;
+    rect(x-9,y+7,18,20,'#ceac91');rect(x-10,y,20,13,'#d9c2a6');rect(x-8,y+11,16,9,'#478399');rect(x-5,y+14,10,4,'#1c3a51');rect(x+p.facing*3,y+4,4,4,'#233249');
+    rect(x-10,y+25,8,4,'#334258');rect(x+2,y+25,8,4,'#334258');
+    if(targetTile&&inReach(targetTile.c,targetTile.r)){ctx.strokeStyle='#e8d29d';ctx.lineWidth=2;ctx.strokeRect(targetTile.c*TILE+2,SURFACE+targetTile.r*TILE+2,TILE-4,TILE-4);}
+    if(mode&&buildings[mode]&&previewX!==null){const b=buildings[mode];ctx.globalAlpha=.45;rect(previewX-b.w/2,SURFACE-b.h,b.w,b.h,'#88e3dc');ctx.globalAlpha=1;}
+  }
+  function drawDarkness(){if(viewY+logicalH<SURFACE)return;
+    const p=s.player,px=p.x-viewX,py=p.y+14-viewY,depth=clamp((p.y-SURFACE)/130,0,.84);
+    if(depth<.1)return;
+    ctx.fillStyle=`rgba(5,10,21,${depth*.78})`;ctx.fillRect(0,0,logicalW,logicalH);
+    const radius=s.upgrades.lamp?230:140;
+    const glow=ctx.createRadialGradient(px,py,12,px,py,radius);
+    glow.addColorStop(0,'rgba(160,221,211,.35)');glow.addColorStop(.55,'rgba(91,159,162,.15)');glow.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=glow;ctx.fillRect(px-radius,py-radius,radius*2,radius*2);
+  }
+  function draw(){ctx.setTransform(scale,0,0,scale,0,0);ctx.fillStyle='#142134';ctx.fillRect(0,0,logicalW,logicalH);
+    ctx.save();ctx.translate(-viewX,-viewY);drawBackground();drawTerrain();drawResources();drawSites();drawActors();ctx.restore();
+    drawDarkness();if(phase()==='밤')rect(0,0,logicalW,logicalH,'#10112b22');
+  }
+  function updateHud(){const rem=phase()==='낮'?DAY-s.time%CYCLE:CYCLE-s.time%CYCLE;
+    $('clock').textContent=`${phase()==='낮'?'☀ 낮':'☾ 밤'} ${s.day}일차 · ${Math.floor(rem/60)}:${String(Math.floor(rem%60)).padStart(2,'0')} · ♥${Math.ceil(s.hp)}`;
+    $('materials').textContent=`▧ ${s.inv.stone}   ⬡ ${s.inv.metal}   ❀ ${s.inv.fiber}   ✦ ${s.inv.crystal}   ◉ ${s.food}   동료 ${s.allies.length}`;
+    const site=s.sites.find(a=>!a.done&&nearSite(a,90));
+    $('status').textContent=site?`${buildings[site.kind].name}: ${Object.entries(buildings[site.kind].cost).map(([k,n])=>`${names[k]} ${site.put[k]||0}/${n}`).join(' · ')}${supplied(site)?' · 건설 중':' · 채집으로 넣기'}`:
+      mode==='ladder'?'빈 지하 칸을 터치해 사다리 설치':mode&&buildings[mode]?`${buildings[mode].name} 설계도: 지면 터치`:
+      s.player.y>SURFACE?'지하 탐험 · 조이스틱 방향으로 채굴':'가방에서 자원을 확인하고 설계도로 건설';
+  }
+  function loop(now){const dt=Math.min((now-last)/1000,.06);last=now;update(dt);draw();updateHud();requestAnimationFrame(loop);}
+  requestAnimationFrame(loop);
 })();
