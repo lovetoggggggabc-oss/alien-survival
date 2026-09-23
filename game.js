@@ -197,10 +197,10 @@
 
   let logicalW=420,logicalH=780,scale=1,viewX=0,viewY=0;
   let speed=1,mode=null,targetTile=null,previewX=null,previewY=null;
-  let last=performance.now(),mineCooldown=0,attackCooldown=0,spawnCooldown=0,caveSpawnCooldown=5,saveClock=0,toastClock=0,hitClock=0,hitTile=null,blockImpact=null;
+  let last=performance.now(),mineCooldown=0,gatherCooldown=0,attackCooldown=0,spawnCooldown=0,caveSpawnCooldown=5,saveClock=0,toastClock=0,hitClock=0,hitTile=null,blockImpact=null;
   let hurtClock=0,deathClock=0,painTimer=0,attackFlash=0,craftResult='',craftResultClock=0;
   const damageFloats=[],constructionParticles=[];
-  let joystick={x:0,y:0,pointer:null},held={mine:false,attack:false};
+  let joystick={x:0,y:0,pointer:null},held={mine:false,gather:false,attack:false};
   function resize() {
     const d=Math.min(devicePixelRatio||1,2),portrait=innerHeight>innerWidth;
     canvas.width=Math.round(innerWidth*d);canvas.height=Math.round(innerHeight*d);
@@ -327,16 +327,22 @@
   }
   function beginBlock(kind){if(!s.inv[kind]){flash(`${names[kind]}이 부족해요`);return;}
     mode=`place:${kind}`;hideModal();flash(`${names[kind]} 설치: 가까운 빈 칸을 터치하세요`);}
-  function placeBlock(c,r,kind){
+  function placeBlock(c,r,kind,underfoot=false){
     if(c<0||c>=COLS||r<0||r>=ROWS||!inReach(c,r)){flash('캐릭터 가까운 칸을 선택하세요');return;}
     if(tileAt(c,r)){flash('이미 블록이 있는 칸이에요');return;}
     const p=s.player,x=c*TILE,y=ORIGIN+r*TILE;
     if(x<p.x+8&&x+TILE>p.x-8&&y<p.y+24&&y+TILE>p.y){flash('캐릭터가 있는 곳에는 설치할 수 없어요');return;}
-    if(![[c-1,r],[c+1,r],[c,r-1],[c,r+1]].some(([a,b])=>tileAt(a,b))){flash('다른 블록에 붙여 설치하세요');return;}
+    if(!underfoot&&![[c-1,r],[c+1,r],[c,r-1],[c,r+1]].some(([a,b])=>tileAt(a,b))){flash('다른 블록에 붙여 설치하세요');return;}
     if(!s.inv[kind]){mode=null;flash(`${names[kind]}이 부족해요`);return;}
     s.placedBlocks[`${c},${r}`]=blockTypes[kind];delete s.enemyDamage[`${c},${r}`];s.inv[kind]--;
     if(!s.inv[kind])mode=null;
     flash(`${names[kind]} 블록 설치 완료${withinOutpost(x+TILE/2,y+TILE/2)?'':' · 전초기지 밖: 다음 날 파괴'}`);
+  }
+  function placeBelow(){const selected=mode?.startsWith('place:')?mode.slice(6):s.hotbar[s.hotbarSlot];
+    if(!blockTypes[selected]){flash('핫바에서 돌·흙·나무 블록을 선택하세요');return;}
+    const c=Math.floor(s.player.x/TILE),r=Math.ceil((s.player.y+24-ORIGIN)/TILE);
+    if(tileAt(c,r)){flash('발밑에 이미 블록이 있어요');return;}
+    placeBlock(c,r,selected,true);
   }
   function supplied(site){return Object.entries(buildings[site.kind].cost).every(([k,n])=>(site.put[k]||0)>=n);}
   function deliver(site,player){let moved=false;
@@ -347,20 +353,17 @@
     if(moved)flash(`${buildings[site.kind].name}에 재료 투입`);
     else if(player)flash('부족한 재료는 가방에서 확인하세요');
   }
-  function mine(){
+  function gather(){
     const p=s.player;
-    if((s.settings.controlMode==='keyboard'?(keyboard.down?1:0):joystick.y)<.35){
-      const site=s.sites.filter(a=>!a.done&&nearSite(a,85)).sort((a,b)=>Math.abs(a.x-p.x)-Math.abs(b.x-p.x))[0];
-      if(site){
-        if(supplied(site)){site.progress+=.6;emitConstruction(site,7);flash(`${buildings[site.kind].name} 건설 중…`);}
-        else deliver(site,true);
-        return;
-      }
-      const resource=s.resources.filter(a=>Math.abs(a.x-p.x)<48&&Math.abs((p.y+24)-groundY(a.x))<65).sort((a,b)=>Math.abs(a.x-p.x)-Math.abs(b.x-p.x))[0];
-      if(resource){collect(resource);return;}
-    }
+    const resource=s.resources.filter(a=>Math.abs(a.x-p.x)<48&&Math.abs((p.y+24)-groundY(a.x))<65).sort((a,b)=>Math.abs(a.x-p.x)-Math.abs(b.x-p.x))[0];
+    if(resource){collect(resource);return;}
+    flash('채집할 자원 가까이 이동하세요');
+  }
+  function mine(){
+    const site=s.sites.filter(a=>!a.done&&nearSite(a,85)).sort((a,b)=>Math.abs(a.x-s.player.x)-Math.abs(b.x-s.player.x))[0];
+    if(site){if(supplied(site)){site.progress+=.6;emitConstruction(site,7);flash(`${buildings[site.kind].name} 건설 중…`);}else deliver(site,true);return;}
     const tile=selectDigTile();if(tile&&dig(tile.c,tile.r))return;
-    flash('땅이나 자원 가까이 이동하세요');
+    flash('캐낼 블록 가까이 이동하세요');
   }
   function damageEnemy(enemy,amount){const dealt=Math.min(enemy.hp,amount);enemy.hp-=amount;enemy.hitFlash=.18;
     damageFloats.push({x:enemy.x+random(-7,7),y:(enemy.drawY??groundY(enemy.x))-36,text:`-${dealt}`,life:.85,color:'#ffdd9b'});
@@ -538,7 +541,7 @@
       ${toolReady?`<h3>⚒ 도구 제작대</h3>${rows(true)}`:''}
       ${ready?`<h3>⚙ 제작소</h3>${rows(false)}`:''}`);}
   function showSettings(){showModal('⚙ 설정',`<div class="settings-row"><div><b>조작 방식</b><br><span class="section-note">키보드 또는 화면 조이스틱 선택</span></div><select data-control-mode aria-label="조작 방식"><option value="joystick" ${s.settings.controlMode==='joystick'?'selected':''}>조이스틱</option><option value="keyboard" ${s.settings.controlMode==='keyboard'?'selected':''}>키보드</option></select></div>
-    <p class="hint">키보드: A/D 또는 ←/→ 이동 · W/↑ 사다리 · S/↓ 아래 채집 · 스페이스 점프 · E 채집 · F 공격 · I 가방 · 숫자 1~8 핫바. 키보드 선택 시 화면 조이스틱과 전투 버튼이 숨겨집니다.</p><div class="settings-row"><div><b>조이스틱 크기</b><br><span class="section-note">작게 ← → 크게 · 최대 200</span></div><input type="range" min="80" max="200" step="4" data-setting="joystick" value="${s.settings.joystickSize}" aria-label="조이스틱 크기"><span id="size-value">${s.settings.joystickSize}</span></div>
+    <p class="hint">키보드: A/D 좌우 이동 · W 사다리 · S+E 아래 블록 캐기 · 스페이스 점프 · E 장착 도구 사용/건설 · G 자원 채집 · F 공격 · I 가방 · 숫자 1~8 핫바. 키보드 선택 시 화면 조이스틱과 전투 버튼이 숨겨집니다.</p><div class="settings-row"><div><b>조이스틱 크기</b><br><span class="section-note">작게 ← → 크게 · 최대 200</span></div><input type="range" min="80" max="200" step="4" data-setting="joystick" value="${s.settings.joystickSize}" aria-label="조이스틱 크기"><span id="size-value">${s.settings.joystickSize}</span></div>
     <p class="hint">크기 설정은 자동으로 저장됩니다. 작은 화면에서는 버튼과 겹치지 않도록 크기가 조절됩니다.</p><div class="settings-row"><span>현재 진행 상황</span><button data-save="1">저장</button></div>
     <div class="settings-row"><div><b>리스폰 · 시작 지점으로</b><br><span class="section-note">X 0 · Y 0으로 이동하고 체력이 회복됩니다. 가방·건물·진행 상황은 유지됩니다.</span></div><button data-respawn="1">리스폰</button></div>`);}
   const roleName={combat:'전투',farmer:'농부',builder:'건설'};
@@ -590,7 +593,7 @@
   });
   $('modal-body').addEventListener('change',e=>{if(!e.target.matches('[data-control-mode]'))return;
     s.settings.controlMode=e.target.value==='keyboard'?'keyboard':'joystick';
-    keyboard.left=keyboard.right=keyboard.down=keyboard.up=keyboard.mine=keyboard.attack=false;
+    keyboard.left=keyboard.right=keyboard.down=keyboard.up=keyboard.mine=keyboard.gather=keyboard.attack=false;
     joystick.x=joystick.y=0;stick.style.transform='translate(0,0)';
     document.body.classList.toggle('keyboard-controls',s.settings.controlMode==='keyboard');save(true);
   });
@@ -616,9 +619,11 @@
   function holdButton(id,key,action){const b=$(id);b.addEventListener('pointerdown',e=>{e.preventDefault();b.setPointerCapture(e.pointerId);held[key]=true;action();});
     for(const type of ['pointerup','pointercancel','lostpointercapture'])b.addEventListener(type,()=>held[key]=false);}
   holdButton('mine','mine',()=>{mineCooldown=.28;mine();});
+  holdButton('gather','gather',()=>{gatherCooldown=.28;gather();});
   holdButton('attack','attack',attack);
+  $('place-below').addEventListener('pointerdown',e=>{e.preventDefault();placeBelow();});
   $('jump').addEventListener('pointerdown',e=>{e.preventDefault();jump();});
-  const keyboard={left:false,right:false,down:false,up:false,mine:false,attack:false};
+  const keyboard={left:false,right:false,down:false,up:false,mine:false,gather:false,attack:false};
   addEventListener('keydown',e=>{if(s.settings.controlMode!=='keyboard'||$('overlay').classList.contains('open'))return;
     if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].includes(e.key))e.preventDefault();
     if(['a','ArrowLeft'].includes(e.key))keyboard.left=true;
@@ -627,6 +632,7 @@
     if(['w','ArrowUp'].includes(e.key))keyboard.up=true;
     if(e.code==='Space'&&!e.repeat){e.preventDefault();jump();}
     if(e.key.toLowerCase()==='e')keyboard.mine=true;
+    if(e.key.toLowerCase()==='g')keyboard.gather=true;
     if(e.key.toLowerCase()==='f')keyboard.attack=true;
     if(e.key.toLowerCase()==='i'&&!e.repeat)showBag();
     if(/^[1-8]$/.test(e.key)&&!e.repeat){s.hotbarSlot=Number(e.key)-1;renderHotbar();}});
@@ -635,6 +641,7 @@
     if(['s','ArrowDown'].includes(e.key))keyboard.down=false;
     if(['w','ArrowUp'].includes(e.key))keyboard.up=false;
     if(e.key.toLowerCase()==='e')keyboard.mine=false;
+    if(e.key.toLowerCase()==='g')keyboard.gather=false;
     if(e.key.toLowerCase()==='f')keyboard.attack=false;});
   addEventListener('blur',()=>{for(const key of Object.keys(keyboard))keyboard[key]=false;});
   function eventWorld(e){const bounds=canvas.getBoundingClientRect();return {x:(e.clientX-bounds.left)*logicalW/bounds.width+viewX,y:(e.clientY-bounds.top)*logicalH/bounds.height+viewY};}
@@ -648,7 +655,7 @@
     if(chest){showChest(chest);return;}
     const site=s.sites.find(a=>Math.abs(a.x-p.x)<buildings[a.kind].w*.32&&p.y>=siteGroundY(a)-buildings[a.kind].h*.7&&p.y<=siteGroundY(a)+7);
     if(site){if(Math.abs(site.x-s.player.x)<150&&Math.abs(siteGroundY(site)-(s.player.y+24))<95)showSiteManagement(site);else flash('건물 가까이에서 터치하세요');return;}
-    if(c>=0&&c<COLS&&r>=0&&r<ROWS&&tileAt(c,r)&&inReach(c,r)){targetTile={c,r};flash('선택한 블록을 채집 버튼으로 파세요');}
+    if(c>=0&&c<COLS&&r>=0&&r<ROWS&&tileAt(c,r)&&inReach(c,r)){targetTile={c,r};flash('선택한 블록을 도구 버튼이나 E키로 파세요');}
     else targetTile=null;
   });
 
@@ -675,6 +682,7 @@
     if(ladder&&(joystick.y<-.25||keyboard.up)){p.vy=0;moveAxis(-105*dt,'y');}
     else{p.vy=clamp(p.vy+710*dt,-380,370);if(moveAxis(p.vy*dt,'y'))p.vy=0;}
     if(held.mine||keyboard.mine){mineCooldown-=dt;if(mineCooldown<=0){mine();mineCooldown=.28;}}
+    if(held.gather||keyboard.gather){gatherCooldown-=dt;if(gatherCooldown<=0){gather();gatherCooldown=.28;}}
     attackCooldown=Math.max(0,attackCooldown-dt);attackFlash=Math.max(0,attackFlash-dt);
     if((held.attack||keyboard.attack)&&attackCooldown<=0)attack();
     for(let i=s.drops.length-1;i>=0;i--){const item=s.drops[i];item.age=(item.age||0)+dt;
