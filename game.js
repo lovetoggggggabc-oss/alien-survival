@@ -946,8 +946,8 @@
         else if(a.role==='farmer'&&phase()==='낮'){const farm=s.sites.find(t=>t.id===a.farmId&&t.kind==='farm'&&t.done&&t.x>=minimum&&t.x<=maximum);
           if(farm){destination=farm.x+Math.sin(s.time*.17+s.allies.indexOf(a)*2)*21;
             if(Math.abs(a.x-farm.x)<43&&Math.abs(a.footY-siteGroundY(farm))<34){a.farming=true;
-              farm.cropClock=(farm.cropClock||0)+gameDt;
-              if(farm.cropClock>=4){farm.cropClock-=4;farm.cropProgress=Math.min(100,(farm.cropProgress||0)+1);
+              if((farm.cropProgress||0)<100)farm.cropClock=(farm.cropClock||0)+dt;
+              if(farm.cropClock>=1&&(farm.cropProgress||0)<100){farm.cropClock-=1;farm.cropProgress=Math.min(100,(farm.cropProgress||0)+1);
                 if(farm.cropProgress===100)damageFloats.push({x:farm.x,y:siteGroundY(farm)-48,text:'수확 가능!',life:1,color:'#d9e99e'});}}}}
         else if(a.role==='combat')destination=base+(s.allies.indexOf(a)%3-1)*70;
       }
