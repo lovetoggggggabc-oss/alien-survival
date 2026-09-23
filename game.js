@@ -130,8 +130,12 @@
   function mine(){
     const p=s.player;
     if(nearSurface()&&joystick.y<.35){
-      const site=s.sites.filter(a=>!a.done&&nearSite(a,85)&&!supplied(a)).sort((a,b)=>Math.abs(a.x-p.x)-Math.abs(b.x-p.x))[0];
-      if(site){deliver(site,true);return;}
+      const site=s.sites.filter(a=>!a.done&&nearSite(a,85)).sort((a,b)=>Math.abs(a.x-p.x)-Math.abs(b.x-p.x))[0];
+      if(site){
+        if(supplied(site)){site.progress+=.6;flash(`${buildings[site.kind].name} 건설 중…`);}
+        else deliver(site,true);
+        return;
+      }
       const resource=s.resources.filter(a=>Math.abs(a.x-p.x)<48).sort((a,b)=>Math.abs(a.x-p.x)-Math.abs(b.x-p.x))[0];
       if(resource){collect(resource);return;}
     }
@@ -170,7 +174,7 @@
 
   function showModal(title,html){$('modal-title').textContent=title;$('modal-body').innerHTML=html;$('overlay').classList.add('open');}
   function hideModal(){$('overlay').classList.remove('open');}
-  const slot=(symbol,label,count)=>`<div class="slot"><strong>${symbol}</strong>${label}<br><b>×${count}</b></div>`;
+  const slot=(symbol,label,count)=>`<div class="slot"><strong>${symbol}</strong>${label}<br><b>${typeof count==='number'?'×':''}${count}</b></div>`;
   function showBag(){showModal('🎒 가방',`<div class="grid">
     ${slot('▧','암석',s.inv.stone)}${slot('⬡','금속',s.inv.metal)}${slot('❀','섬유',s.inv.fiber)}
     ${slot('✦','발광 수정',s.inv.crystal)}${slot('◉','식량',s.food)}${slot('⚕','회복약',s.inv.medkit)}
@@ -258,7 +262,7 @@
     for(const site of s.sites){if(site.done||!supplied(site))continue;
       const workers=s.allies.filter(a=>a.role==='haul'&&Math.abs(a.x-site.x)<80).length;
       site.progress+=gameDt*((nearSite(site,115)?1:0)+workers*.7);
-      if(site.progress>=buildings[site.kind].work){site.done=true;flash(`${buildings[site.kind].name} 완성!`);}}
+      if(site.progress>=buildings[site.kind].work){site.done=true;held.mine=false;flash(`${buildings[site.kind].name} 완성!`);}}
     for(const a of s.allies){a.work=(a.work||0)-gameDt;let destination=880;
       if(a.role==='haul'){const site=s.sites.find(t=>!t.done);if(site){destination=site.x-24;
         if(Math.abs(a.x-site.x)<70&&a.work<=0&&!supplied(site)){deliver(site,false);a.work=2;}}}
@@ -293,24 +297,35 @@
       rect(x,y,i%8===0?3:2,2,night?'#c6def0':'#9cbfc8');}
     rect(1650,35,65,65,night?'#b6a4b7':'#d0bfa2');
     rect(1662,44,18,13,night?'#817897':'#aaa08e');
-    for(let i=0;i<31;i++){let x=i*84+(i*17)%40;
-      rect(x,SURFACE-112-i%4*13,48,112+i%4*13,night?'#323d5c':'#4a6577');
-      rect(x+7,SURFACE-128-i%4*13,29,19,night?'#647085':'#9b98a1');}
-    for(let i=0;i<25;i++){let x=i*101+13;
-      rect(x+19,SURFACE-64,6,64,'#4d5d6c');
-      rect(x,SURFACE-79,44,22,i%3===0?'#9a628d':'#7b9c98');
-      rect(x+9,SURFACE-89,27,14,i%3===0?'#be8ca8':'#99b8ae');
-      rect(x+11,SURFACE-75,4,3,'#dce1c0');rect(x+29,SURFACE-73,4,3,'#dce1c0');}
+    for(let i=0;i<27;i++){const x=i*91+(i*37)%27,height=48+Math.floor(hash(i,3)*95),width=29+Math.floor(hash(i,9)*43);
+      rect(x,SURFACE-height,width,height,night?'#2c3e5b':'#4b6878');
+      rect(x+6,SURFACE-height-10,width-13,13,night?'#5a6982':'#8da1a2');
+      if(i%4===0)rect(x+width/2-3,SURFACE-height-29,6,20,'#8198a7');}
+    for(let i=0;i<27;i++){const x=i*88+19,v=hash(i,17),biome=Math.floor(x/760);
+      if(v>.55){const height=43+Math.floor(v*50),width=23+Math.floor(hash(i,8)*25);
+        rect(x+width/2-3,SURFACE-height+13,6,height-13,biome===1?'#536c75':'#536e66');
+        rect(x,SURFACE-height,width,15,biome===1?'#758bb2':biome===2?'#a1749f':'#81ac9c');
+        rect(x+6,SURFACE-height-8,width-12,10,biome===1?'#acb4d0':biome===2?'#c89fbb':'#abcfc0');
+        rect(x+8,SURFACE-height+7,3,3,'#e5d9b6');}
+      else{rect(x+2,SURFACE-20,5,20,'#507e6e');rect(x-5,SURFACE-27,21,12,biome===2?'#a780ad':'#81b99d');}}
+    for(const x of [316,1280,2040]){
+      rect(x-16,SURFACE-35,33,35,'#637d8c');rect(x-9,SURFACE-63,20,30,'#85b8bd');
+      rect(x-3,SURFACE-89,8,28,'#a2e1d4');rect(x+6,SURFACE-42,14,16,'#709caf');}
+    for(const x of [600,1770]){
+      rect(x-31,SURFACE-67,12,67,'#677b85');rect(x+20,SURFACE-67,12,67,'#677b85');
+      rect(x-30,SURFACE-76,62,12,'#8fa1a1');rect(x-4,SURFACE-92,9,16,'#a2c3b8');}
   }
   function drawTerrain(){const left=Math.max(0,Math.floor(viewX/TILE)-1),right=Math.min(COLS-1,Math.ceil((viewX+logicalW)/TILE)+1);
     const top=Math.max(0,Math.floor((viewY-SURFACE)/TILE)-1),bottom=Math.min(ROWS-1,Math.ceil((viewY+logicalH-SURFACE)/TILE)+1);
     for(let r=top;r<=bottom;r++)for(let c=left;c<=right;c++){
       const type=tileAt(c,r),x=c*TILE,y=SURFACE+r*TILE,noise=hash(c,r);
       if(type===0){rect(x,y,TILE,TILE,'#1a2b38');if(noise>.68)rect(x+5,y+6,3,3,'#47666d');continue;}
-      const colors={1:r===0?'#536b64':'#4c5e67',2:'#44566a',3:'#4d6275',4:'#4b536c'};
+      const biome=Math.floor(c*TILE/760);
+      const colors={1:r===0?['#536b64','#606f75','#685b70'][biome]:['#4c5e67','#505e71','#5b536d'][biome],2:['#44566a','#4a5b70','#504c66'][biome],3:'#4d6275',4:'#4b536c'};
       rect(x,y,31,31,colors[type]);
-      rect(x+2,y+2,27,3,type===1?'#748d79':'#617488');
-      rect(x+3,y+23,22,3,'#334558');
+      rect(x+2,y+2,19+noise*9,2,type===1?'#748d79':'#617488');
+      if(noise>.32)rect(x+4+(noise*8|0),y+22,12+noise*8,2,'#34475a');
+      else{rect(x+7,y+16,3,3,'#647888');rect(x+21,y+25,4,2,'#334a5a');}
       if(type===1&&r===0){rect(x,y,32,7,'#7fa88e');rect(x+7,y-3,4,4,'#a9c3a0');}
       if(type===3){rect(x+6,y+7,8,9,'#78b2bd');rect(x+20,y+18,6,6,'#9bd0cf');}
       if(type===4){rect(x+11,y+3,9,21,'#a88fd2');rect(x+16,y+9,7,13,'#c9b9ed');rect(x+6,y+16,5,10,'#7d94c5');}
