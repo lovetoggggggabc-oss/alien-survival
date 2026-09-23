@@ -69,11 +69,12 @@
     upgrades:{pickaxe:false,sword:false,lamp:false},
     ownedGear:{basicSword:true,basicPickaxe:true},gearCount:{basicSword:1,basicPickaxe:1},equipped:{weapon:'basicSword',tool:'basicPickaxe',helmet:null,armor:null,legs:null,boots:null,light:null},
     player:{x:880,y:SURFACE-28,vy:0,facing:1},sites:[],allies:[],enemies:[],resources:[],
-    terrain:null,ladders:[],placedBlocks:{},enemyDamage:{},chests:[],drops:[],blueprints:{},settings:{joystickSize:108,controlMode:'joystick'},kills:0,nextSiteId:1,nextAllyId:1,pendingBedOffers:[],
+    terrain:null,ladders:[],placedBlocks:{},enemyDamage:{},chests:[],drops:[],blueprints:{},settings:{joystickSize:108,actionSize:60,controlMode:'joystick',layout:{}},letterSeen:false,kills:0,nextSiteId:1,nextAllyId:1,pendingBedOffers:[],
     stats:{blocksMined:0,maxDepth:0,woodCollected:0,buildingsBuilt:0,maxDistance:0},awards:{},selectedItem:'stone',hotbar:['stone','dirt','wood','food','medkit','ladder','chest','copper'],hotbarSlot:0});
   let s;
   // 새 월드 규칙을 모두에게 적용한다. 이전 버전의 브라우저 기록은 불러오지 않는다.
   const SAVE_KEY='alien-survival-save-world-2';
+  function clampActionSize(v){return Math.max(44,Math.min(92,Number(v)||60));}
   try { s = JSON.parse(localStorage.getItem(SAVE_KEY)) || initial(); } catch { s = initial(); }
   if (!s.version || s.version<2) {
     const old = s, fresh = initial();
@@ -106,6 +107,8 @@
     ally.maxHp=Number(ally.maxHp)||Math.max(40,Number(ally.hp)||40);
     ally.hp=Math.max(0,Math.min(ally.maxHp,Number(ally.hp)||ally.maxHp));ally.equipment||={};}
   s.placedBlocks ||= {};s.enemyDamage||={};s.blueprints ||= {};s.settings={...initial().settings,...s.settings};
+  s.settings.actionSize=clampActionSize(s.settings.actionSize);
+  s.settings.layout=s.settings.layout&&typeof s.settings.layout==='object'?s.settings.layout:{};
   if(!['joystick','keyboard'].includes(s.settings.controlMode))s.settings.controlMode='joystick';
   s.stats={...initial().stats,...s.stats};s.awards||={};s.selectedItem||='stone';
   s.hotbar=Array.from({length:8},(_,i)=>initial().hotbar.includes(s.hotbar?.[i])||['metal','iron','fiber','crystal'].includes(s.hotbar?.[i])?s.hotbar[i]:initial().hotbar[i]);
@@ -318,6 +321,16 @@
       actor.drawY=actor.footY-38*Math.sin(Math.PI*t);
       if(t>=1){actor.footY=jump.endY;actor.drawY=jump.endY;actor.gapJump=null;}
       return;}
+    // 저장된 공중 좌표나 발판이 사라진 자리에서는 아래 발판까지 자연스럽게 내려온다.
+    const beneath=walkableFoot(actor.x,actor.footY);
+    if(beneath!==null&&beneath>actor.footY+TILE*1.5){
+      actor.footY=Math.min(beneath,actor.footY+Math.max(115,actor.fallSpeed||0)*gameDt);
+      actor.fallSpeed=Math.min(360,(actor.fallSpeed||115)+600*gameDt);
+      actor.drawY=actor.footY;
+      if(actor.footY>=beneath)actor.fallSpeed=0;
+      return;
+    }
+    actor.fallSpeed=0;
     const direction=Math.sign(destination-actor.x),distance=Math.min(Math.abs(destination-actor.x),speed*gameDt);
     if(!direction||!distance){const standing=walkableFoot(actor.x,actor.footY);if(standing!==null)actor.footY=standing;
       actor.drawY+=clamp(actor.footY-actor.drawY,-195*gameDt,220*gameDt);return;}
@@ -611,8 +624,22 @@
       ${ready?`<h3>⚙ 제작소</h3>${rows(false)}`:''}`);}
   function showSettings(){showModal('⚙ 설정',`<div class="settings-row"><div><b>조작 방식</b><br><span class="section-note">키보드 또는 화면 조이스틱 선택</span></div><select data-control-mode aria-label="조작 방식"><option value="joystick" ${s.settings.controlMode==='joystick'?'selected':''}>조이스틱</option><option value="keyboard" ${s.settings.controlMode==='keyboard'?'selected':''}>키보드</option></select></div>
     <p class="hint">키보드: A/D 좌우 이동 · W 사다리 · S+E 아래 블록 캐기 · 스페이스 점프 · E 장착 도구 사용/건설 · G 자원 채집 · F 공격 · I 가방 · 숫자 1~8 핫바. 키보드 선택 시 화면 조이스틱과 전투 버튼이 숨겨집니다.</p><div class="settings-row"><div><b>조이스틱 크기</b><br><span class="section-note">작게 ← → 크게 · 최대 200</span></div><input type="range" min="80" max="200" step="4" data-setting="joystick" value="${s.settings.joystickSize}" aria-label="조이스틱 크기"><span id="size-value">${s.settings.joystickSize}</span></div>
-    <p class="hint">크기 설정은 자동으로 저장됩니다. 작은 화면에서는 버튼과 겹치지 않도록 크기가 조절됩니다.</p><div class="settings-row"><span>현재 진행 상황</span><button data-save="1">저장</button></div>
-    <div class="settings-row"><div><b>리스폰 · 시작 지점으로</b><br><span class="section-note">X 0 · Y 0으로 이동하고 체력이 회복됩니다. 가방·건물·진행 상황은 유지됩니다.</span></div><button data-respawn="1">리스폰</button></div>`);}
+    <div class="settings-row"><div><b>오른쪽 버튼 크기</b><br><span class="section-note">도구·채집·설치·공격·점프</span></div><input type="range" min="44" max="92" step="4" data-setting="actions" value="${s.settings.actionSize}" aria-label="오른쪽 버튼 크기"><span id="action-size-value">${s.settings.actionSize}</span></div>
+    <div class="settings-row"><div><b>자유 배치</b><br><span class="section-note">조이스틱과 오른쪽 버튼을 각각 원하는 곳으로 옮겨요.</span></div><button data-layout-edit="1">배치하기</button></div>
+    <p class="hint">크기와 위치 설정은 자동 저장됩니다.</p><div class="settings-row"><span>현재 진행 상황</span><button data-save="1">저장</button></div>
+    <div class="settings-row"><div><b>리스폰 · 시작 지점으로</b><br><span class="section-note">체력만 회복하고 가방과 진행도는 유지합니다.</span></div><button data-respawn="1">리스폰</button></div>
+    <div class="settings-row"><div><b>게임 리셋</b><br><span class="section-note">저장된 월드와 진행도를 처음부터 다시 시작합니다.</span></div><button data-reset-prompt="1">게임 리셋</button></div>`);}
+  function showLetter(){showModal('✉ 편지',`<div class="story-letter"><p>먼 미래, 인류는 우주 곳곳으로 탐사선을 보내며 새로운 행성을 조사하기 시작했다.</p>
+    <p>플레이어 역시 미지의 행성을 조사하기 위해 우주를 항해하던 탐사대원 중 한 명이었다.</p>
+    <p>하지만 이동 도중 예상치 못한 사고가 발생하고, 플레이어가 탄 소형 우주선은 항로를 이탈해 지도에도 제대로 기록되지 않은 외계 행성에 불시착한다.</p>
+    <p>우주선은 크게 파손되었고 통신 장비도 작동하지 않는다.</p><p>당장 구조를 요청하거나 행성을 떠나는 것은 불가능하다.</p>
+    <p>결국 플레이어는 이곳에서 살아남을 방법부터 찾아야 한다.</p>
+    <p>다행히 이 행성에는 나무와 광물, 식량으로 사용할 수 있는 생물과 식물이 존재한다.</p>
+    <p>그리고 얼마 지나지 않아 한 가지 사실을 알게 된다.</p><p>이 행성에는 이미 문명을 이루고 살아가는 외계인들이 있다.</p>
+    <p>처음에는 서로 말조차 통하지 않지만, 플레이어가 그들을 돕고 교류하면서 조금씩 관계가 형성된다.</p>
+    <p>일부 외계인은 플레이어가 만든 정착지에 들어와 함께 생활하기 시작한다.</p>
+    <p>누군가는 농사를 짓고,<br>누군가는 자원을 채집하고,<br>누군가는 건설을 돕거나 정착지를 지킨다.</p>
+    <p>그렇게 혼자 시작했던 작은 임시 거처는 여러 외계인들이 함께 살아가는 하나의 정착지로 성장한다.</p></div><button data-letter-close="1">편지 닫기</button>`);}
   const roleName={combat:'전투',farmer:'농부',builder:'건설'};
   function showAllies(){const offers=s.pendingBedOffers.filter(id=>eligibleBeds().some(a=>a.id===id));
     showModal('✦ 동료',`<p class="hint">침대가 완성된 다음 날 동료의 역할을 고릅니다. 각 동료는 매일 식량 10개를 먹고, 식량이 부족하면 떠납니다.</p>
@@ -661,11 +688,19 @@
     if(b.dataset.take)transferChest(b.dataset.take,'take');
     if(b.dataset.save)save();
     if(b.dataset.respawn)respawn();
+    if(b.dataset.layoutEdit)startLayoutEditing();
+    if(b.dataset.resetPrompt)showModal('게임 리셋',`<p class="hint">정말 리셋하시겠습니까?</p><p class="section-note">[진행도가 모두 초기화 됩니다]</p><div class="ally-choices"><button data-reset-yes="1">예</button><button data-reset-no="1">아니요</button></div>`);
+    if(b.dataset.resetNo)showSettings();
+    if(b.dataset.resetYes){try{localStorage.removeItem(SAVE_KEY);location.reload();}catch{flash('저장 데이터를 지우지 못했어요');}}
+    if(b.dataset.letterClose)hideModal();
   });
-  $('modal-body').addEventListener('input',e=>{if(e.target.dataset.setting!=='joystick')return;
-    s.settings.joystickSize=clamp(Number(e.target.value),80,200);
-    document.documentElement.style.setProperty('--joy-size',`${s.settings.joystickSize}px`);
-    $('size-value').textContent=s.settings.joystickSize;save(true);
+  $('modal-body').addEventListener('input',e=>{const setting=e.target.dataset.setting;
+    if(setting==='joystick'){s.settings.joystickSize=clamp(Number(e.target.value),80,200);
+      document.documentElement.style.setProperty('--joy-size',`${s.settings.joystickSize}px`);
+      $('size-value').textContent=s.settings.joystickSize;applyControlLayout();save(true);}
+    if(setting==='actions'){s.settings.actionSize=clampActionSize(e.target.value);
+      document.documentElement.style.setProperty('--action-size',`${s.settings.actionSize}px`);
+      $('action-size-value').textContent=s.settings.actionSize;applyControlLayout();save(true);}
   });
   $('modal-body').addEventListener('change',e=>{if(!e.target.matches('[data-control-mode]'))return;
     s.settings.controlMode=e.target.value==='keyboard'?'keyboard':'joystick';
@@ -674,7 +709,7 @@
     document.body.classList.toggle('keyboard-controls',s.settings.controlMode==='keyboard');save(true);
   });
   $('close').onclick=hideModal;$('overlay').addEventListener('pointerdown',e=>{if(e.target===$('overlay'))hideModal();});
-  $('bag').onclick=()=>showBag();$('equipment').onclick=showEquipment;$('awards').onclick=showAwards;$('drafting').onclick=showDrafting;$('build').onclick=showBuild;$('craft').onclick=showCraft;$('allies').onclick=showAllies;$('settings').onclick=showSettings;
+  $('bag').onclick=()=>showBag();$('letter-button').onclick=showLetter;$('equipment').onclick=showEquipment;$('awards').onclick=showAwards;$('drafting').onclick=showDrafting;$('build').onclick=showBuild;$('craft').onclick=showCraft;$('allies').onclick=showAllies;$('settings').onclick=showSettings;
   $('hotbar').addEventListener('click',e=>{const slot=e.target.closest('[data-hotbar]');if(!slot)return;const i=Number(slot.dataset.hotbar);
     if(i===s.hotbarSlot)useHotbar();else{s.hotbarSlot=i;flash(`${names[s.hotbar[i]]} 선택 · 다시 누르면 사용`);}renderHotbar();});
   document.addEventListener('pointerdown',e=>{const b=e.target.closest('button');if(b&&!b.disabled)b.classList.add('pressed');});
@@ -682,8 +717,46 @@
   $('cancel-mode').onclick=()=>{mode=null;previewX=null;previewY=null;flash('선택을 취소했어요');};
   $('speed').onclick=()=>{speed=speed===1?10:1;$('speed').textContent=`×${speed}`;flash(`시간 속도 ×${speed}`);};
   document.documentElement.style.setProperty('--joy-size',`${clamp(s.settings.joystickSize,80,200)}px`);
+  document.documentElement.style.setProperty('--action-size',`${s.settings.actionSize}px`);
   document.body.classList.toggle('keyboard-controls',s.settings.controlMode==='keyboard');
   const joy=$('joystick'),stick=$('stick');
+  const layoutIds=['joystick','mine','gather','place-below','attack','jump'];
+  let layoutEditing=false,layoutDrag=null;
+  function applyControlLayout(){for(const id of layoutIds){const el=$(id),point=s.settings.layout[id];
+      if(!point||!Number.isFinite(point.x)||!Number.isFinite(point.y)){
+        el.style.position='';el.style.left='';el.style.top='';el.style.right='';el.style.bottom='';el.style.zIndex='';el.style.width='';el.style.height='';continue;}
+      const width=id==='joystick'?joy.getBoundingClientRect().width:s.settings.actionSize;
+      const height=id==='joystick'?joy.getBoundingClientRect().height:s.settings.actionSize+(id==='jump'?10:0);
+      el.style.position='fixed';el.style.left=`${clamp(point.x*innerWidth,4,Math.max(4,innerWidth-width-4))}px`;
+      el.style.top=`${clamp(point.y*innerHeight,4,Math.max(4,innerHeight-height-4))}px`;
+      el.style.right='auto';el.style.bottom='auto';el.style.zIndex='20';
+      if(id!=='joystick'){el.style.width=`${s.settings.actionSize}px`;el.style.height=`${height}px`;}
+    }}
+  function startLayoutEditing(){hideModal();layoutEditing=true;
+    s.settings.controlMode='joystick';document.body.classList.remove('keyboard-controls');document.body.classList.add('layout-editing');
+    applyControlLayout();flash('조이스틱과 오른쪽 버튼을 드래그하세요');}
+  function finishLayoutEditing(){layoutEditing=false;layoutDrag=null;document.body.classList.remove('layout-editing');save(true);flash('버튼 배치가 저장됐어요');}
+  $('layout-done').onclick=finishLayoutEditing;
+  $('layout-default').onclick=()=>{s.settings.layout={};applyControlLayout();save(true);flash('기본 위치로 되돌렸어요');};
+  document.addEventListener('pointerdown',e=>{if(!layoutEditing)return;
+    const el=e.target.closest('#joystick,#actions button');if(!el)return;
+    e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();
+    const box=el.getBoundingClientRect();layoutDrag={el,id:el.id,pointer:e.pointerId,dx:e.clientX-box.left,dy:e.clientY-box.top};
+    el.setPointerCapture(e.pointerId);
+  },true);
+  document.addEventListener('pointermove',e=>{if(!layoutDrag||e.pointerId!==layoutDrag.pointer)return;
+    e.preventDefault();e.stopPropagation();const {el,dx,dy}=layoutDrag,box=el.getBoundingClientRect();
+    const x=clamp(e.clientX-dx,4,Math.max(4,innerWidth-box.width-4));
+    const y=clamp(e.clientY-dy,4,Math.max(4,innerHeight-box.height-4));
+    s.settings.layout[el.id]={x:x/innerWidth,y:y/innerHeight};applyControlLayout();
+  },true);
+  for(const event of ['pointerup','pointercancel'])document.addEventListener(event,e=>{if(!layoutDrag||e.pointerId!==layoutDrag.pointer)return;
+    e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();
+    layoutDrag=null;save(true);
+  },true);
+  document.addEventListener('click',e=>{if(layoutEditing&&e.target.closest('#joystick,#actions button')){e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();}},true);
+  applyControlLayout();
+  addEventListener('resize',applyControlLayout);
   function updateJoystick(e){const box=joy.getBoundingClientRect(),cx=box.left+box.width/2,cy=box.top+box.height/2;
     let dx=(e.clientX-cx)/(box.width*.34),dy=(e.clientY-cy)/(box.height*.34),mag=Math.hypot(dx,dy);
     if(mag>1){dx/=mag;dy/=mag;}joystick.x=dx;joystick.y=dy;
@@ -1113,5 +1186,6 @@
   }
   function loop(now){const dt=Math.min((now-last)/1000,.06);last=now;update(dt);draw();updateHud();globalThis.__alienGameReady=true;requestAnimationFrame(loop);}
   reconcileUnsupported();
+  if(!s.letterSeen){s.letterSeen=true;save(true);showLetter();}
   requestAnimationFrame(loop);
 })();
