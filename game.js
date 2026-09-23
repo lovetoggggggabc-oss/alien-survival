@@ -273,7 +273,30 @@
     }
     return null;
   }
+  function startGapJump(enemy,direction){if(!direction||enemy.gapJump)return false;
+    const foot=enemy.footY??groundY(enemy.x),front=enemy.x+direction*12;
+    const immediate=walkableFoot(front,foot);
+    if(immediate!==null&&immediate-foot<=TILE*1.5)return false;
+    const current=Math.floor(enemy.x/TILE),row=Math.floor((foot-ORIGIN)/TILE);
+    for(let n=2;n<=5;n++){const c=current+direction*n;if(c<1||c>=COLS-1)break;
+      const x=(c+.5)*TILE,landing=walkableFoot(x,foot);
+      if(landing===null||Math.abs(landing-foot)>TILE*1.2)continue;
+      let clear=true;
+      for(let step=1;step<=n;step++){const mid=current+direction*step;
+        if(tileAt(mid,row-2)||tileAt(mid,row-3)){clear=false;break;}}
+      if(!clear)continue;
+      enemy.gapJump={startX:enemy.x,endX:x,startY:foot,endY:landing,progress:0,duration:Math.max(.42,Math.abs(x-enemy.x)/145)};
+      return true;
+    }
+    return false;
+  }
   function moveWalker(actor,destination,speed,gameDt){actor.footY??=groundY(actor.x);actor.drawY??=actor.footY;
+    if(actor.gapJump){const jump=actor.gapJump,t=Math.min(1,jump.progress+gameDt/jump.duration);jump.progress=t;
+      actor.x=jump.startX+(jump.endX-jump.startX)*t;
+      actor.footY=jump.startY+(jump.endY-jump.startY)*t;
+      actor.drawY=actor.footY-38*Math.sin(Math.PI*t);
+      if(t>=1){actor.footY=jump.endY;actor.drawY=jump.endY;actor.gapJump=null;}
+      return;}
     const direction=Math.sign(destination-actor.x),distance=Math.min(Math.abs(destination-actor.x),speed*gameDt);
     if(!direction||!distance){const standing=walkableFoot(actor.x,actor.footY);if(standing!==null)actor.footY=standing;
       actor.drawY+=clamp(actor.footY-actor.drawY,-195*gameDt,220*gameDt);return;}
@@ -281,6 +304,7 @@
     for(let i=0;i<segments;i++){
       const nextX=actor.x+step,front=nextX+direction*7,foot=walkableFoot(front,actor.footY);
       if(foot===null)break;
+      if(foot>actor.footY+TILE*1.5)break;
       if(foot<actor.footY-1){actor.drawY=Math.max(foot,actor.drawY-195*gameDt);
         if(actor.drawY>foot+1){climbing=true;break;}
       }
@@ -397,8 +421,9 @@
     if(enemy)damageEnemy(enemy,s.equipped.weapon==='sword'?30:s.equipped.weapon==='spear'?25:18);else flash('공격 범위에 적이 없어요');}
   function flatFoundation(x,width,clickedY){const left=Math.floor((x-width*.31)/TILE),right=Math.floor((x+width*.31)/TILE);
     if(left<0||right>=COLS)return null;
-    const base=Math.floor((groundY(x)-ORIGIN)/TILE),candidates=[];
-    for(let r=Math.max(1,base-4);r<Math.min(ROWS,base+6);r++){
+    // 자연 지면을 판 뒤 놓은 블록이나 그 위로 쌓은 바닥도 지지대로 인정한다.
+    const center=Math.floor((clickedY-ORIGIN)/TILE),candidates=[];
+    for(let r=Math.max(1,center-6);r<Math.min(ROWS,center+7);r++){
       let level=true;for(let c=left;c<=right;c++)if(!tileAt(c,r)||tileAt(c,r-1)){level=false;break;}
       if(level)candidates.push(ORIGIN+r*TILE);
     }
@@ -546,6 +571,7 @@
       <h3>주변 건물 관리 · 다음 날 철거</h3>${nearby.length?nearby.map(a=>`<div class="recipe"><div><b>${buildings[a.kind].icon} ${buildings[a.kind].name}</b><small>${a.demolishDay?`${a.demolishDay}일차 철거 예약`:'터치해서 철거 예약 또는 취소'}</small></div><button data-manage-site="${a.id}">관리</button></div>`).join(''):'<p class="section-note">건물 가까이 가거나 건물을 직접 터치해 관리하세요.</p>'}`);}
   function showSiteManagement(site){if(!s.sites.includes(site))return;
     showModal(`${buildings[site.kind].icon} ${buildings[site.kind].name}`,`<p class="hint">${site.done?'건설 완료':'건설 중'} · 건물은 바닥 블록이 없어지면 무너집니다.</p>
+      ${site.kind==='farm'?`<h3>재배할 작물</h3><p class="section-note">현재: ${site.crop==='fiber'?'섬유':'식량'} · 완성된 재배실은 매일 아침 선택한 작물을 3개 생산합니다.</p><div class="ally-choices"><button data-farm-crop="${site.id}:food" ${site.crop!=='fiber'?'disabled':''}>▣ 식량 재배</button><button data-farm-crop="${site.id}:fiber" ${site.crop==='fiber'?'disabled':''}>✿ 섬유 재배</button></div>`:''}
       ${site.demolishDay?`<p class="section-note">${site.demolishDay}일차 아침에 철거 예정</p><button data-undo-demolish="${site.id}">철거 취소</button>`:
       `<button data-demolish="${site.id}">다음 날 철거하기</button>`}`);}
   function showCraft(){const ready=workshopReady(),toolReady=toolbenchReady();
@@ -578,6 +604,8 @@
     if(b.dataset.plan)createPlan(b.dataset.plan);
     if(b.dataset.craft)craft(b.dataset.craft);
     if(b.dataset.manageSite){const site=s.sites.find(a=>a.id===Number(b.dataset.manageSite));if(site)showSiteManagement(site);}
+    if(b.dataset.farmCrop){const [id,crop]=b.dataset.farmCrop.split(':'),site=s.sites.find(a=>a.id===Number(id)&&a.kind==='farm');
+      if(site&&['food','fiber'].includes(crop)){site.crop=crop;save(true);showSiteManagement(site);flash(`재배실: ${crop==='fiber'?'섬유':'식량'} 재배 선택`);}}
     if(b.dataset.chooseAlly){const [id,role]=b.dataset.chooseAlly.split(':');chooseAlly(Number(id),role);}
     if(b.dataset.allyGear!==undefined)showAllyEquipment(Number(b.dataset.allyGear));
     if(b.dataset.allyBack)showAllies();
@@ -728,7 +756,7 @@
     if(s.temperature>=39||s.temperature<=34)takeDamage(gameDt*.12);
     if(s.hp<=0){respawn(true);return;}
     if(Math.floor(s.time/CYCLE)>prev){s.day++;const demolished=processDemolitions(),cleared=clearOutsideOutposts();
-      for(const site of s.sites)if(site.done&&site.kind==='farm')s.food+=3;
+      for(const site of s.sites)if(site.done&&site.kind==='farm'){if(site.crop==='fiber')s.inv.fiber+=3;else s.food+=3;}
       assignLegacyBeds();const activeBeds=new Set(eligibleBeds().map(a=>a.id));let bedless=0;
       for(const ally of [...s.allies])if(ally.bedId&&!activeBeds.has(ally.bedId)){s.allies.splice(s.allies.indexOf(ally),1);bedless++;}
       scheduleBedOffers();let departed=0;
@@ -775,7 +803,8 @@
         if(a.role==='builder'){const site=s.sites.find(t=>!t.done&&t.x>=minimum&&t.x<=maximum);
           if(site){destination=site.x-24;if(Math.abs(a.x-site.x)<70&&a.work<=0&&!supplied(site)){deliver(site,false);a.work=2;}}}
         else if(a.role==='farmer'&&phase()==='낮'){const farm=s.sites.filter(t=>t.kind==='farm'&&t.done&&t.x>=minimum&&t.x<=maximum).sort((u,v)=>Math.abs(u.x-a.x)-Math.abs(v.x-a.x))[0];
-          if(farm){destination=farm.x;if(Math.abs(a.x-farm.x)<42&&a.work<=0){s.food++;a.work=28;damageFloats.push({x:farm.x,y:siteGroundY(farm)-40,text:'식량 +1',life:.85,color:'#a9e6a4'});}}}
+          if(farm){destination=farm.x;if(Math.abs(a.x-farm.x)<42&&a.work<=0){const fiber=farm.crop==='fiber';if(fiber)s.inv.fiber++;else s.food++;
+            a.work=28;damageFloats.push({x:farm.x,y:siteGroundY(farm)-40,text:`${fiber?'섬유':'식량'} +1`,life:.85,color:'#a9e6a4'});}}}
         else if(a.role==='combat')destination=base+(s.allies.indexOf(a)%3-1)*70;
       }
       destination=clamp(destination,minimum+10,maximum-10);
@@ -796,7 +825,7 @@
             const collapsed=reconcileUnsupported();if(Math.abs(enemy.x-p.x)<160&&!collapsed)flash('몬스터가 설치한 블록을 부쉈어요');
           }
         }}
-      else moveWalker(enemy,tx,clamp(40+s.day*2,40,87),gameDt);
+      else{startGapJump(enemy,direction);moveWalker(enemy,tx,clamp(40+s.day*2,40,87),gameDt);}
       if(block)moveWalker(enemy,enemy.x,0,gameDt);
       if(Math.abs(enemy.x-p.x)<26&&Math.abs((enemy.footY??groundY(enemy.x))-p.y-28)<52&&enemy.strike<=0){
         const protection=(s.equipped.armor==='armor'?3:0)+(s.equipped.helmet==='helmet'?1:0)+(s.equipped.legs==='leggings'?1:0)+(s.equipped.boots==='boots'?1:0);
@@ -833,11 +862,13 @@
       const sand=blend(3000)*(1-blend(5300)),snow=blend(7500)*(1-blend(10500));
       if(sand||snow)rect(x,-100,TILE,600,`rgba(${snow?194:219},${snow?220:164},${snow?226:126},${(snow*.19+sand*.16).toFixed(3)})`);
       // 먼 산과 지면 안개를 겹쳐 하늘과 땅의 경계를 부드럽게 만든다.
-      const ridge=y-58-22*Math.sin(c*.036)-17*Math.sin(c*.011);
-      rect(x,ridge,TILE,Math.max(0,y-ridge),night?'#43556a77':zone==='desert'?'#b6998066':zone==='tundra'?'#8ca9b577':'#64828b77');
-      const mist=ctx.createLinearGradient(0,y-68,0,y+35);
+      let ridgeHeight=0,weight=0;
+      for(let offset=-8;offset<=8;offset++){const w=9-Math.abs(offset);ridgeHeight+=groundY(clamp(x+offset*TILE,0,WORLD_W-1))*w;weight+=w;}
+      const ridge=ridgeHeight/weight-78-15*Math.sin(c*.026)-10*Math.sin(c*.009);
+      rect(x,ridge,TILE,Math.max(0,y+110-ridge),night?'#43556a77':zone==='desert'?'#b6998066':zone==='tundra'?'#8ca9b577':'#64828b77');
+      const mist=ctx.createLinearGradient(0,ridge-45,0,ridge+105);
       mist.addColorStop(0,'#b2c6b900');mist.addColorStop(.63,night?'#8696a936':'#c1d1bf55');mist.addColorStop(1,'#243b4100');
-      ctx.fillStyle=mist;ctx.fillRect(x,y-68,TILE,103);
+      ctx.fillStyle=mist;ctx.fillRect(x,ridge-45,TILE,150);
     }
     for(let i=0;i<1160;i++){const x=(i*373+83)%WORLD_W,y=11+(i*79)%280;
       if(y<groundY(x)-17)rect(x,y,i%8===0?3:2,2,night?'#c6def0':'#9cbfc8');}
@@ -881,6 +912,12 @@
       const drawnType=(type===3||type===4||type===6||type===7)&&!visibleOre?2:type;
       const colors={1:zone==='desert'?'#ad8459':zone==='tundra'?'#596f79':r===surfaceRows[c]?['#695c53','#70605b','#745962'][biome]:'#68564f',2:zone==='desert'?'#7d6858':zone==='tundra'?'#50687b':['#44566a','#4a5b70','#504c66'][biome],3:'#4d6275',4:'#4b536c',5:'#806857',6:'#946d54',7:'#637683'};
       rect(x,y,TILE,TILE,colors[drawnType]);
+      // 흙과 암석의 직선 경계에 작은 자갈과 흙 얼룩을 섞는다.
+      if(!s.placedBlocks[`${c},${r}`]&&(drawnType===1||drawnType===2)){
+        const transition=surfaceRows[c]+3,near=Math.abs(r-transition)<=2;
+        if(near){const flecks=drawnType===1?'#566077':'#765c54';
+          for(let k=0;k<4;k++){const h=hash(c*7+k,r*11-k);if(h>.28)rect(x+2+Math.floor(h*15),y+3+Math.floor(hash(c+k,r-k)*14),2+Math.floor(h*3),2,flecks);}}
+      }
       rect(x+2,y+2,13+noise*6,2,drawnType===1?'#a18170':drawnType===5?'#ae906c':'#617488');
       if(noise>.32)rect(x+4+(noise*5|0),y+15,7+noise*4,2,'#34475a');
       else{rect(x+5,y+10,3,3,'#647888');rect(x+15,y+17,3,2,'#334a5a');}
@@ -897,10 +934,11 @@
       rect(x,y,3,TILE,'#c5a570');rect(x+11,y,3,TILE,'#c5a570');for(let j=0;j<3;j++)rect(x,y+4+j*6,14,2,'#dfc08c');}
   }
   function drawSurfaceMist(){const left=Math.max(0,Math.floor(viewX/TILE)-1),right=Math.min(COLS-1,Math.ceil((viewX+logicalW)/TILE)+1);
-    for(let c=left;c<=right;c++){const x=c*TILE,y=groundY(x),zone=biomeAt(x);
-      const mist=ctx.createLinearGradient(0,y-23,0,y+19);
-      mist.addColorStop(0,'#c0d2cd00');mist.addColorStop(.52,zone==='desert'?'#e2cca12b':zone==='tundra'?'#c8e2e841':'#a5c5b839');mist.addColorStop(1,'#8fa5ad00');
-      ctx.fillStyle=mist;ctx.fillRect(x,y-23,TILE,42);
+    for(let c=left;c<=right;c++){const x=c*TILE,zone=biomeAt(x);
+      let y=0,weight=0;for(let offset=-4;offset<=4;offset++){const w=5-Math.abs(offset);y+=groundY(clamp(x+offset*TILE,0,WORLD_W-1))*w;weight+=w;}y/=weight;
+      const mist=ctx.createLinearGradient(0,y-42,0,y+35);
+      mist.addColorStop(0,'#c0d2cd00');mist.addColorStop(.52,zone==='desert'?'#e2cca121':zone==='tundra'?'#c8e2e82e':'#a5c5b82b');mist.addColorStop(1,'#8fa5ad00');
+      ctx.fillStyle=mist;ctx.fillRect(x,y-42,TILE,77);
     }}
   function drawResources(){for(const a of s.resources){let x=a.x,y=groundY(a.x);
     if(a.type==='fiber'){rect(x-3,y-28,6,28,'#699280');rect(x-12,y-36,24,15,'#a6c8a0');rect(x+4,y-45,7,16,'#7bb5a0');}
@@ -940,7 +978,7 @@
     else if(a.kind==='toolbench'){rect(x,y+23,info.w,info.h-23,'#605952');rect(x+5,y+15,info.w-10,13,'#b49b78');
       rect(x+12,y+30,15,20,'#45717b');rect(x+52,y+29,16,21,'#527789');rect(x+30,y+9,23,7,'#aac6c4');text('⚒',x+36,y+9,16,'#e7deaa');}
     else if(a.kind==='bed'){rect(x,y+17,info.w,info.h-17,'#657889');rect(x+5,y+11,info.w-10,17,'#caa883');rect(x+7,y+13,16,10,'#dee2cc');}
-    else if(a.kind==='farm'){rect(x,y+23,info.w,25,'#70605c');for(let j=0;j<6;j++){rect(x+j*16+8,y+9,4,17,'#70b992');rect(x+j*16+4,y+5,11,7,'#addd92');}}
+    else if(a.kind==='farm'){const fiber=a.crop==='fiber';rect(x,y+23,info.w,25,'#70605c');for(let j=0;j<6;j++){rect(x+j*16+8,y+9,4,17,fiber?'#95b8bd':'#70b992');rect(x+j*16+4,y+5,11,7,fiber?'#bfd7cf':'#addd92');}text(fiber?'섬유':'식량',x+24,y+3,12,'#e2f3d5');}
     else{rect(x,y,info.w,info.h,'#718792');for(let j=0;j<3;j++)rect(x+6,y+9+j*27,20,15,'#9eafb1');}
     if(a.completeFlash>0){const pulse=a.completeFlash;
       ctx.strokeStyle=`rgba(255,224,149,${Math.min(1,pulse)})`;ctx.lineWidth=4;ctx.strokeRect(x-11*pulse,y-11*pulse,info.w+22*pulse,info.h+22*pulse);
