@@ -1184,7 +1184,9 @@
       withinOutpost(s.player.x,groundY(s.player.x))?'전초기지 보호 범위 · 설계도 작업대에서 모닥불 설계도 제작':'전초기지 밖 · 설치물은 다음 날 파괴돼요';
     $('cancel-mode').style.display=mode?'block':'none';
   }
-  function loop(now){const dt=Math.min((now-last)/1000,.06);last=now;update(dt);draw();updateHud();globalThis.__alienGameReady=true;requestAnimationFrame(loop);}
+  function loop(now){const dt=Math.min((now-last)/1000,.06);last=now;
+    if(!$('overlay').classList.contains('open')||$('modal-title').textContent!=='✉ 편지')update(dt);
+    draw();updateHud();globalThis.__alienGameReady=true;requestAnimationFrame(loop);}
   reconcileUnsupported();
   if(!s.letterSeen){s.letterSeen=true;save(true);showLetter();}
   requestAnimationFrame(loop);
