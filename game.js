@@ -483,7 +483,8 @@
   function updateArrows(dt){for(let i=flyingArrows.length-1;i>=0;i--){const arrow=flyingArrows[i];let hit=false;
       const steps=Math.max(1,Math.ceil(Math.hypot(arrow.vx*dt,arrow.vy*dt)/8)),step=dt/steps;
       for(let j=0;j<steps&&!hit;j++){arrow.x+=arrow.vx*step;arrow.y+=arrow.vy*step;arrow.vy+=610*step;
-        const enemy=s.enemies.find(e=>Math.abs(e.x-arrow.x)<16&&arrow.y>(e.drawY??groundY(e.x))-34&&arrow.y<(e.drawY??groundY(e.x))+2);
+        // 화면에 그린 몬스터 전체(머리와 몸통)에 맞춘 충돌 판정.
+        const enemy=s.enemies.find(e=>Math.abs(e.x-arrow.x)<21&&arrow.y>=(e.drawY??e.footY??groundY(e.x))-43&&arrow.y<=(e.drawY??e.footY??groundY(e.x))+5);
         if(enemy){damageEnemy(enemy,24);hit=true;break;}
         if(arrow.x<0||arrow.x>=WORLD_W||arrow.y>WORLD_H||tileAt(Math.floor(arrow.x/TILE),Math.floor((arrow.y-ORIGIN)/TILE)))hit=true;
       }
@@ -976,10 +977,14 @@
               if((farm.cropProgress||0)<100)farm.cropClock=(farm.cropClock||0)+dt;
               if(farm.cropClock>=1&&(farm.cropProgress||0)<100){farm.cropClock-=1;farm.cropProgress=Math.min(100,(farm.cropProgress||0)+1);
                 if(farm.cropProgress===100)damageFloats.push({x:farm.x,y:siteGroundY(farm)-48,text:'수확 가능!',life:1,color:'#d9e99e'});}}}}
-        else if(a.role==='combat')destination=base+(s.allies.indexOf(a)%3-1)*70;
+        else if(a.role==='combat'){
+          const threats=s.enemies.filter(e=>e.x>=minimum&&e.x<=maximum&&Math.abs((e.footY??groundY(e.x))-a.footY)<TILE*3);
+          const nearest=threats.sort((u,v)=>Math.abs(u.x-a.x)-Math.abs(v.x-a.x))[0];
+          destination=nearest?nearest.x:base+(s.allies.indexOf(a)%3-1)*70;
+        }
       }
       destination=clamp(destination,minimum+10,maximum-10);
-      moveWalker(a,destination,78,gameDt);
+      moveWalker(a,destination,a.role==='combat'?105:78,gameDt);
       if(a.role==='combat'){const reach=a.equipment?.weapon==='spear'?105:70;
         const enemy=s.enemies.find(e=>Math.abs(e.x-a.x)<reach&&Math.abs((e.footY??groundY(e.x))-a.footY)<60);
         if(enemy&&a.work<=0){damageEnemy(enemy,a.equipment?.weapon==='sword'?25:a.equipment?.weapon==='spear'?21:a.equipment?.weapon==='basicSword'?17:12);a.work=a.equipment?.weapon==='spear'?1.2:.85;}}
