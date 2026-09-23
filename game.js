@@ -474,7 +474,7 @@
     p.x=SPAWN_X;p.y=groundY(SPAWN_X)-24;p.vy=0;p.facing=1;
     s.enemies=s.enemies.filter(e=>Math.abs(e.x-SPAWN_X)>220);
     mode=null;targetTile=null;previewX=null;previewY=null;held.mine=false;held.attack=false;
-    viewX=clamp(p.x-logicalW*.5,0,WORLD_W-logicalW);viewY=clamp(p.y-logicalH*.30,0,WORLD_H-logicalH);
+    viewX=p.x-logicalW*.5;viewY=p.y+12-logicalH*.5;
     hideModal();save(true);flash(isDeath?'쓰러져서 시작 지점에서 부활했어요':'시작 지점 X 0 · Y 0으로 리스폰했어요');
   }
   function beginLadder(){if(!s.inv.ladder){flash('사다리가 없어요');return;}mode='ladder';hideModal();flash('근처 지하 빈 칸을 터치해 사다리를 설치하세요');}
@@ -790,15 +790,15 @@
     for(let i=damageFloats.length-1;i>=0;i--){damageFloats[i].life-=dt;damageFloats[i].y-=29*dt;if(damageFloats[i].life<=0)damageFloats.splice(i,1);}
     saveClock+=dt;if(saveClock>12){save(true);saveClock=0;}
     if(toastClock>0){toastClock-=dt;if(toastClock<=0)$('toast').classList.remove('show');}
-    viewX=clamp(p.x-logicalW*.5,0,WORLD_W-logicalW);
-    viewY=clamp(p.y-logicalH*.30,0,WORLD_H-logicalH);
+    viewX=p.x-logicalW*.5;
+    viewY=p.y+12-logicalH*.5;
   }
 
   function rect(x,y,w,h,color){ctx.fillStyle=color;ctx.fillRect(Math.round(x),Math.round(y),Math.round(w),Math.round(h));}
   function text(str,x,y,size=12,color='#edf5ea'){ctx.font=`bold ${size}px monospace`;ctx.fillStyle=color;ctx.fillText(str,Math.round(x),Math.round(y));}
   function drawBackground(){const night=phase()==='밤';let sky=ctx.createLinearGradient(0,-120,0,490);
     sky.addColorStop(0,night?'#111c3b':'#315a77');sky.addColorStop(.62,night?'#38405e':'#7093a0');sky.addColorStop(1,night?'#54526a':'#b7adb0');
-    ctx.fillStyle=sky;ctx.fillRect(0,-100,WORLD_W,620);
+    ctx.fillStyle=sky;ctx.fillRect(-logicalW,-logicalH-100,WORLD_W+logicalW*2,logicalH+620);
     const left=Math.max(0,Math.floor(viewX/TILE)-1),right=Math.min(COLS-1,Math.ceil((viewX+logicalW)/TILE)+1);
     for(let c=left;c<=right;c++){const x=c*TILE,y=groundY(x),zone=biomeAt(x);
       const blend=(edge)=>clamp((x-edge+260)/520,0,1);
