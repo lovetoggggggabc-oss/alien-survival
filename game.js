@@ -243,7 +243,7 @@
   function save(silent=false) { localStorage.setItem(SAVE_KEY,JSON.stringify(s));if(!silent) flash('게임을 저장했어요'); }
   const phase=()=>s.time%CYCLE<DAY?'낮':'밤';
   const nearSurface=()=>s.player.y<groundY(s.player.x)+45;
-  const siteGroundY=site=>site.y??groundY(site.x);
+  function siteGroundY(site){return site.y??groundY(site.x);}
   const nearSite=(site,radius=115)=>Math.abs(s.player.x-site.x)<radius&&Math.abs(s.player.y+24-siteGroundY(site))<85;
   const withinOutpost=(x,y)=>s.sites.some(a=>a.kind==='outpost'&&a.done&&Math.abs(x-a.x)<=18*TILE&&Math.abs(y-siteGroundY(a))<=18*TILE);
   const nearCampfire=()=>s.sites.some(a=>a.kind==='campfire'&&a.done&&Math.hypot(s.player.x-a.x,s.player.y+24-siteGroundY(a))<=8*TILE);
