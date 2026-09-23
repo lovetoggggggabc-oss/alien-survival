@@ -233,6 +233,10 @@
   function celebrateCraft(name,site){craftResult=`✦ ${name} 제작 완료!`;craftResultClock=2.8;emitConstruction(site,28);site.completeFlash=.8;
     damageFloats.push({x:site.x,y:siteGroundY(site)-45,text:`✦ ${name}`,life:1.3,color:'#f7dfa0'});
   }
+  function showEquipEffect(name){const p=s.player;
+    damageFloats.push({x:p.x,y:p.y-14,text:`✦ ${name}`,life:1.1,color:'#b7f3de'});
+    for(let i=0;i<12;i++)constructionParticles.push({x:p.x+random(-13,13),y:p.y+random(-5,22),vx:random(-36,36),vy:random(-70,-18),life:random(.35,.75)});
+  }
   const costText=cost=>Object.entries(cost).map(([k,n])=>`${names[k]} ${n}`).join(' · ');
   const canPay=cost=>Object.entries(cost).every(([k,n])=>(k==='food'?s.food:s.inv[k]||0)>=n);
   function pay(cost){for(const [k,n] of Object.entries(cost)){if(k==='food')s.food-=n;else s.inv[k]-=n;}}
@@ -491,6 +495,7 @@
   const slotIcons={helmet:'◕',armor:'▣',legs:'▥',boots:'◧',tool:'⛏',weapon:'⚔',light:'✧'};
   const itemIcons={stone:'▧',dirt:'▦',wood:'▥',metal:'⬡',copper:'◆',iron:'⬢',fiber:'❀',crystal:'✦',food:'◉',medkit:'⚕',ladder:'╫',chest:'▣',basicSword:'⚔',sword:'⚔',spear:'♠',basicPickaxe:'⛏',pickaxe:'⛏',copperPickaxe:'⛏',ironPickaxe:'⛏',armor:'▣',helmet:'◕',leggings:'▥',boots:'◧',lamp:'✧'};
   const bagItems=['stone','dirt','wood','metal','copper','iron','fiber','crystal','food','medkit','ladder','chest'];
+  const itemCategory={stone:'block',dirt:'block',wood:'block',metal:'ore',copper:'ore',iron:'ore',fiber:'nature',crystal:'ore',food:'food',medkit:'food',ladder:'building',chest:'building'};
   function bagCount(id){return gear[id]?Number(!!s.ownedGear[id]):id==='food'?s.food:(s.inv[id]||0);}
   let hotbarSnapshot='';
   function renderHotbar(){const signature=s.hotbarSlot+'|'+s.hotbar.map(id=>`${id}:${bagCount(id)}`).join('|');if(signature===hotbarSnapshot)return;hotbarSnapshot=signature;
@@ -499,19 +504,29 @@
     if(id==='food')eatFood();else if(id==='medkit')useMedkit();else if(id==='ladder')beginLadder();else if(id==='chest')beginChest();
     else if(blockTypes[id])beginBlock(id);else flash(`${names[id]}은 제작과 건설에 사용하는 재료예요`);
   }
-  function showBag(){const id=bagItems.includes(s.selectedItem)?s.selectedItem:'stone',count=bagCount(id);
+  function showBag(activeSlot=null){const id=bagItems.includes(s.selectedItem)?s.selectedItem:'stone',count=bagCount(id);
     const title=names[id],description=['stone','dirt','wood'].includes(id)?'블록으로 설치할 수 있어요.':id==='medkit'?'체력 35 회복':id==='food'?'허기 30 회복':id==='ladder'?'지하 빈 공간에 배치할 수 있어요.':id==='chest'?'지상에 놓고 재료를 넣고 꺼내는 상자예요.':'제작과 건설에 사용하는 재료예요.';
     const action=['stone','dirt','wood'].includes(id)?`<button data-place="${id}" ${!count?'disabled':''}>블록 설치</button>`:
       id==='medkit'?`<button data-use="medkit" ${!count||s.hp>=100?'disabled':''}>회복약 사용</button>`:
       id==='food'?`<button data-use="food" ${!count||s.hunger>=100?'disabled':''}>먹기</button>`:
       id==='ladder'?`<button data-use="ladder" ${!count?'disabled':''}>사다리 배치</button>`:
       id==='chest'?`<button data-use="chest" ${!count?'disabled':''}>상자 배치</button>`:'';
+    const armorSlots=['helmet','armor','legs','boots'],handSlots=['tool','weapon','light'];
+    const slotButton=slot=>`<button class="bag-equip-slot ${activeSlot===slot?'selected':''}" data-bag-slot="${slot}" ${activeSlot===slot?'data-active-slot="1"':''} aria-label="${slotNames[slot]} 장착 칸 · ${gear[s.equipped[slot]]?.name||'비어 있음'}"><span>${slotIcons[slot]}</span><small>${slotNames[slot]}</small><b>${gear[s.equipped[slot]]?.name||'빈 칸'}</b></button>`;
+    const armor=(s.equipped.armor==='armor'?3:0)+(s.equipped.helmet==='helmet'?1:0)+(s.equipped.legs==='leggings'?1:0)+(s.equipped.boots==='boots'?1:0);
+    const attackPower=s.equipped.weapon==='sword'?30:s.equipped.weapon==='spear'?25:18;
+    const mining=s.equipped.tool==='ironPickaxe'?3:['pickaxe','copperPickaxe'].includes(s.equipped.tool)?2:1;
+    const choices=activeSlot?Object.entries(gear).filter(([key,g])=>g.slot===activeSlot&&(s.gearCount[key]||0)>0):[];
     showModal('🎒 가방',`
-      <p class="section-note">채집한 재료와 소비품을 보관합니다. 무기와 방어구는 아래의 장비 버튼에서 변경하세요.</p>
-      <h3>아이템 칸</h3><div class="bag-grid">${bagItems.map(key=>{const qty=bagCount(key);return `<button class="bag-cell ${key===id?'selected':''} ${qty?'':'empty'}" data-select="${key}" aria-label="${gear[key]?.name||names[key]} ${qty}개"><span class="bag-icon">${itemIcons[key]}</span><span class="bag-qty">${qty||''}</span></button>`;}).join('')}</div>
+      <div class="bag-loadout"><div class="bag-wear">${armorSlots.map(slotButton).join('')}</div>
+        <div class="bag-avatar" aria-label="플레이어 장비 미리보기"><div class="avatar-head ${s.equipped.helmet?'worn':''}"></div><div class="avatar-body ${s.equipped.armor?'worn':''}"></div><div class="avatar-legs ${s.equipped.legs?'worn':''}"></div><div class="avatar-boots ${s.equipped.boots?'worn':''}"></div><small>내 캐릭터</small></div>
+        <div class="bag-wear">${handSlots.map(slotButton).join('')}</div></div>
+      <div class="bag-effects">⚔ 공격 ${attackPower} · ${ (1/attackInterval()).toFixed(1)}회/초　⛏ 채굴 ${mining}　▣ 방어 ${armor}<br>◧ 이동 ${s.equipped.boots==='boots'?'빠름':'보통'}　✧ 지하 시야 ${s.equipped.light==='lamp'?'넓음':'보통'}</div>
+      ${activeSlot?`<div class="bag-gear-choice"><b>${slotIcons[activeSlot]} ${slotNames[activeSlot]} 장착</b>${choices.length?choices.map(([key,g])=>`<button data-bag-equip="${key}" ${s.equipped[activeSlot]===key||freeGearCount(key)===0?'disabled':''}>${itemIcons[key]} ${g.name}<small>${g.detail} · 남은 ${freeGearCount(key)}개</small></button>`).join(''):'<p class="hint">이 칸에 맞는 장비가 없어요. 도구 제작대에서 만들어 주세요.</p>'}${s.equipped[activeSlot]?`<button data-bag-unequip="${activeSlot}">장비 벗기</button>`:''}<button data-bag-close="1">닫기</button></div>`:''}
+      <h3>가방 아이템 · 종류별 색과 이름</h3><div class="bag-grid">${bagItems.map(key=>{const qty=bagCount(key);return `<button class="bag-cell ${key===id?'selected':''} ${qty?'':'empty'}" data-select="${key}" data-kind="${itemCategory[key]}" aria-label="${names[key]} ${qty}개"><span class="bag-icon">${itemIcons[key]}</span><span class="bag-item-name">${names[key]}</span><span class="bag-qty">${qty||''}</span></button>`;}).join('')}</div>
       <div class="bag-detail"><div><b>${itemIcons[id]} ${title}</b><small>${description} · ${count}개 보유</small></div>${action}</div>
-      <button data-pin="${id}" class="pin-hotbar">${s.hotbarSlot+1}번 핫바에 넣기</button>
-      <p class="hint">돌·흙·나무를 고르고 블록 설치를 누르면 가까운 빈 칸에 놓을 수 있어요.</p>`);}
+      <h3>핫바에 넣기</h3><p class="section-note">위에서 아이템을 고른 뒤 아래 1~8번 칸을 누르면 바로 들어갑니다.</p>
+      <div class="bag-hotbar">${s.hotbar.map((key,i)=>`<button data-bag-hotbar="${i}" class="${s.hotbarSlot===i?'selected':''}" aria-label="${i+1}번 핫바에 ${names[id]} 넣기"><strong>${i+1}</strong><span>${itemIcons[key]}</span><small>${names[key]}</small></button>`).join('')}</div>`);}
   function showEquipment(){showModal('⚔ 장비',`<p class="section-note">가방과 별도로 무기·곡괭이·방어구를 장착합니다. 공격속도 ${(1/attackInterval()).toFixed(1)}회/초</p>
     <div class="equipment-layout"><div class="body-slots">${['helmet','armor','legs','boots'].map(slot=>`<div class="equip-slot"><span class="equip-icon">${slotIcons[slot]}</span><span>${slotNames[slot]}<b>${gear[s.equipped[slot]]?.name||'빈 칸'}</b></span></div>`).join('')}</div><div class="hand-slots">${['tool','weapon','light'].map(slot=>`<div class="equip-slot"><span class="equip-icon">${slotIcons[slot]}</span><span>${slotNames[slot]}<b>${gear[s.equipped[slot]]?.name||'빈 칸'}</b></span></div>`).join('')}</div></div>
     <h3>보유한 장비</h3>${Object.entries(gear).filter(([id])=>s.gearCount[id]>0).map(([id,g])=>`<div class="recipe"><div><b>${itemIcons[id]} ${g.name}</b><small>${g.detail} · 총 ${s.gearCount[id]}개 · 남은 ${freeGearCount(id)}개</small></div><button data-equip="${id}" ${s.equipped[g.slot]===id||!freeGearCount(id)?'disabled':''}>${s.equipped[g.slot]===id?'장착 중':freeGearCount(id)?'장착':'다른 동료 사용 중'}</button></div>`).join('')}
@@ -573,8 +588,13 @@
     if(b.dataset.demolish){const site=s.sites.find(a=>a.id===Number(b.dataset.demolish));if(site){site.demolishDay=s.day+1;save(true);showSiteManagement(site);flash(`${buildings[site.kind].name}: 다음 날 철거 예약`);}}
     if(b.dataset.undoDemolish){const site=s.sites.find(a=>a.id===Number(b.dataset.undoDemolish));if(site){delete site.demolishDay;save(true);showSiteManagement(site);flash('철거 예약을 취소했어요');}}
     if(b.dataset.select){s.selectedItem=b.dataset.select;showBag();}
-    if(b.dataset.pin){s.hotbar[s.hotbarSlot]=b.dataset.pin;renderHotbar();save(true);flash(`${names[b.dataset.pin]}을 ${s.hotbarSlot+1}번 핫바에 넣었어요`);showBag();}
-    if(b.dataset.equip&&s.ownedGear[b.dataset.equip]&&freeGearCount(b.dataset.equip)>0){const g=gear[b.dataset.equip];s.equipped[g.slot]=b.dataset.equip;save(true);showEquipment();flash(`${g.name} 장착 완료`);}
+    if(b.dataset.bagSlot){showBag(b.dataset.activeSlot?null:b.dataset.bagSlot);}
+    if(b.dataset.bagClose)showBag();
+    if(b.dataset.bagEquip){const id=b.dataset.bagEquip,g=gear[id];if(g&&freeGearCount(id)>0){s.equipped[g.slot]=id;showEquipEffect(g.name);save(true);showBag();flash(`${g.name} 장착 · ${g.detail}`);}}
+    if(b.dataset.bagUnequip){const slot=b.dataset.bagUnequip;if(s.equipped[slot]){s.equipped[slot]=null;save(true);showBag();flash(`${slotNames[slot]} 벗기 완료`);}}
+    if(b.dataset.bagHotbar!==undefined){const slot=Number(b.dataset.bagHotbar),id=s.selectedItem;
+      if(bagItems.includes(id)&&slot>=0&&slot<8){s.hotbar[slot]=id;s.hotbarSlot=slot;renderHotbar();save(true);showBag();flash(`${slot+1}번 핫바: ${names[id]}`);}}
+    if(b.dataset.equip&&s.ownedGear[b.dataset.equip]&&freeGearCount(b.dataset.equip)>0){const g=gear[b.dataset.equip];s.equipped[g.slot]=b.dataset.equip;showEquipEffect(g.name);save(true);showEquipment();flash(`${g.name} 장착 완료`);}
     if(b.dataset.place)beginBlock(b.dataset.place);
     if(b.dataset.use==='medkit')useMedkit();
     if(b.dataset.use==='food')eatFood();
@@ -598,7 +618,7 @@
     document.body.classList.toggle('keyboard-controls',s.settings.controlMode==='keyboard');save(true);
   });
   $('close').onclick=hideModal;$('overlay').addEventListener('pointerdown',e=>{if(e.target===$('overlay'))hideModal();});
-  $('bag').onclick=showBag;$('equipment').onclick=showEquipment;$('awards').onclick=showAwards;$('drafting').onclick=showDrafting;$('build').onclick=showBuild;$('craft').onclick=showCraft;$('allies').onclick=showAllies;$('settings').onclick=showSettings;
+  $('bag').onclick=()=>showBag();$('equipment').onclick=showEquipment;$('awards').onclick=showAwards;$('drafting').onclick=showDrafting;$('build').onclick=showBuild;$('craft').onclick=showCraft;$('allies').onclick=showAllies;$('settings').onclick=showSettings;
   $('hotbar').addEventListener('click',e=>{const slot=e.target.closest('[data-hotbar]');if(!slot)return;const i=Number(slot.dataset.hotbar);
     if(i===s.hotbarSlot)useHotbar();else{s.hotbarSlot=i;flash(`${names[s.hotbar[i]]} 선택 · 다시 누르면 사용`);}renderHotbar();});
   document.addEventListener('pointerdown',e=>{const b=e.target.closest('button');if(b&&!b.disabled)b.classList.add('pressed');});
@@ -937,6 +957,13 @@
     const p=s.player,x=p.x,y=p.y;
     rect(x-7,y+6,14,16,'#ceac91');rect(x-8,y,16,10,'#d9c2a6');rect(x-7,y+10,14,8,'#478399');rect(x-4,y+12,8,4,'#1c3a51');rect(x+p.facing*3,y+4,3,3,'#233249');
     rect(x-8,y+21,6,3,'#334258');rect(x+2,y+21,6,3,'#334258');
+    if(s.equipped.helmet==='helmet'){rect(x-9,y-3,18,6,'#c8b68c');rect(x-6,y-5,12,3,'#e6d7a6');}
+    if(s.equipped.armor==='armor'){rect(x-8,y+9,16,12,'#718e9e');rect(x-5,y+11,10,3,'#b7d0cd');}
+    if(s.equipped.legs==='leggings'){rect(x-7,y+19,6,4,'#9aabb1');rect(x+1,y+19,6,4,'#9aabb1');}
+    if(s.equipped.boots==='boots'){rect(x-9,y+22,8,3,'#dec18d');rect(x+1,y+22,8,3,'#dec18d');}
+    if(s.equipped.weapon==='sword'||s.equipped.weapon==='spear'){rect(x+p.facing*10,y+9,3,18,'#d9e4df');rect(x+p.facing*10-3,y+18,9,2,'#d7b987');}
+    else if(s.equipped.tool&&s.equipped.tool!=='basicPickaxe'){rect(x+p.facing*10,y+9,3,17,'#ba9a75');rect(x+p.facing*10-4,y+7,11,4,s.equipped.tool==='ironPickaxe'?'#c5d9dc':'#d8ab80');}
+    if(s.equipped.light==='lamp'){rect(x-p.facing*12,y+7,5,7,'#f5d88d');rect(x-p.facing*13,y+5,7,2,'#fff1be');}
     for(const effect of damageFloats){ctx.globalAlpha=Math.min(1,effect.life*2);ctx.font='bold 17px monospace';ctx.textAlign='center';ctx.lineWidth=3;ctx.strokeStyle='#251b28';ctx.strokeText(effect.text,effect.x,effect.y);ctx.fillStyle=effect.color;ctx.fillText(effect.text,effect.x,effect.y);ctx.globalAlpha=1;}ctx.textAlign='start';
     const aimed=selectDigTile();if(aimed&&aimed.c>=0&&aimed.c<COLS&&aimed.r>=0&&aimed.r<ROWS){
       const tx=aimed.c*TILE,ty=ORIGIN+aimed.r*TILE,key=`${aimed.c},${aimed.r}`,progress=(s.damage?.[key]||0)/blockHp(tileAt(aimed.c,aimed.r));
