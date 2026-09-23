@@ -9,7 +9,7 @@
   const SPAWN_X=880;
   const WORLD_H = ORIGIN + ROWS * TILE;
   const DAY = 540, NIGHT = 240, CYCLE = DAY + NIGHT;
-  const names = { stone:'돌', dirt:'흙', wood:'나무', metal:'금속', copper:'구리광석', iron:'철광석', fiber:'섬유', crystal:'발광 수정', food:'식량', medkit:'회복약', ladder:'사다리',chest:'보관 상자' };
+  const names = { stone:'돌', dirt:'흙', wood:'나무', metal:'금속', copper:'구리광석', iron:'철광석', fiber:'섬유', crystal:'발광 수정', food:'식량', medkit:'회복약', ladder:'사다리',chest:'보관 상자',arrows:'화살' };
   const buildings = {
     outpost:{ name:'전초기지', icon:'⚑', cost:{stone:3,wood:2,fiber:1}, w:94,h:73,work:6 },
     drafting:{ name:'설계도 작업대', icon:'⌑', cost:{stone:3,metal:1,fiber:2}, w:88,h:75,work:7 },
@@ -26,6 +26,8 @@
     ironPickaxe:{name:'철 곡괭이',description:'채굴력 3 · 단단한 광석도 빠르게 채굴',cost:{iron:4,copper:2,wood:2}},
     sword:{name:'강화 무기',description:'공격 피해가 증가합니다',cost:{metal:4,fiber:2,crystal:1}},
     spear:{name:'수정 창',description:'조금 더 먼 거리에서 공격합니다',cost:{stone:3,wood:2,crystal:3}},
+    bow:{name:'활',description:'공격 버튼을 끌어 조준하고 놓아 발사합니다 · 화살 필요',cost:{wood:4,fiber:4}},
+    arrows:{name:'화살 ×8',description:'활로 발사할 때 한 발씩 소모합니다',cost:{wood:2,stone:2,fiber:1}},
     armor:{name:'금속 방어복',description:'몬스터에게 받는 피해를 줄입니다',cost:{metal:5,fiber:3}},
     helmet:{name:'금속 헬멧',description:'머리를 보호해 받는 피해를 1 줄입니다',cost:{metal:3,fiber:1}},
     leggings:{name:'금속 바지',description:'다리를 보호해 받는 피해를 1 줄입니다',cost:{metal:4,fiber:2}},
@@ -39,6 +41,7 @@
     basicSword:{name:'기본 무기',slot:'weapon',detail:'공격력 18'},
     sword:{name:'강화 무기',slot:'weapon',detail:'공격력 30'},
     spear:{name:'수정 창',slot:'weapon',detail:'공격력 25 · 긴 사거리'},
+    bow:{name:'활',slot:'weapon',detail:'공격력 24 · 방향을 끌어 조준 · 화살 소모'},
     basicPickaxe:{name:'기본 곡괭이',slot:'tool',detail:'채굴력 1'},
     pickaxe:{name:'강화 곡괭이',slot:'tool',detail:'채굴력 2'},
     copperPickaxe:{name:'구리 곡괭이',slot:'tool',detail:'채굴력 2'},
@@ -65,7 +68,7 @@
     hunter:{icon:'⚔',name:'밤의 수호자',description:'적 5마리 처치하기',goal:5,stat:'kills'}
   };
   const initial = () => ({version:12,time:0,day:1,hp:100,hunger:100,temperature:36.5,tempClock:0,lastBiome:'meadow',food:4,
-    inv:{stone:5,dirt:4,wood:2,metal:2,copper:0,iron:0,fiber:3,crystal:0,ladder:0,medkit:0,chest:0},
+    inv:{stone:5,dirt:4,wood:2,metal:2,copper:0,iron:0,fiber:3,crystal:0,ladder:0,medkit:0,chest:0,arrows:0},
     upgrades:{pickaxe:false,sword:false,lamp:false},
     ownedGear:{basicSword:true,basicPickaxe:true},gearCount:{basicSword:1,basicPickaxe:1},equipped:{weapon:'basicSword',tool:'basicPickaxe',helmet:null,armor:null,legs:null,boots:null,light:null},
     player:{x:880,y:SURFACE-28,vy:0,facing:1},sites:[],allies:[],enemies:[],resources:[],
@@ -112,7 +115,7 @@
   s.settings.layout=s.settings.layout&&typeof s.settings.layout==='object'?s.settings.layout:{};
   if(!['joystick','keyboard'].includes(s.settings.controlMode))s.settings.controlMode='joystick';
   s.stats={...initial().stats,...s.stats};s.awards||={};s.selectedItem||='stone';
-  s.hotbar=Array.from({length:8},(_,i)=>initial().hotbar.includes(s.hotbar?.[i])||['metal','iron','fiber','crystal'].includes(s.hotbar?.[i])?s.hotbar[i]:initial().hotbar[i]);
+  s.hotbar=Array.from({length:8},(_,i)=>initial().hotbar.includes(s.hotbar?.[i])||['metal','iron','fiber','crystal','arrows'].includes(s.hotbar?.[i])?s.hotbar[i]:initial().hotbar[i]);
   s.hotbarSlot=Math.max(0,Math.min(7,Number(s.hotbarSlot)||0));
   s.ownedGear={...initial().ownedGear,...s.ownedGear};s.equipped={...initial().equipped,...s.equipped};
   for(const key of ['pickaxe','sword','lamp'])if(s.upgrades[key]){
@@ -225,7 +228,8 @@
   let speed=1,mode=null,targetTile=null,previewX=null,previewY=null,mineAim=null,minePointer=null,mineTargetKey=null,lastMineAt=0;
   let last=performance.now(),mineCooldown=0,gatherCooldown=0,attackCooldown=0,spawnCooldown=0,caveSpawnCooldown=5,saveClock=0,toastClock=0,hitClock=0,hitTile=null,blockImpact=null;
   let hurtClock=0,deathClock=0,painTimer=0,attackFlash=0,craftResult='',craftResultClock=0;
-  const damageFloats=[],constructionParticles=[];
+  const damageFloats=[],constructionParticles=[],flyingArrows=[];
+  let bowAim=null,bowPointer=null;
   let joystick={x:0,y:0,pointer:null},held={mine:false,gather:false,attack:false};
   function resize() {
     // iPad Safari에서 큰 캔버스 할당이 실패하면 첫 프레임이 그려지지 않는다.
@@ -276,7 +280,7 @@
   const workshopReady=()=>s.sites.some(a=>a.kind==='workshop'&&a.done&&nearSite(a,135));
   const toolbenchReady=()=>s.sites.some(a=>a.kind==='toolbench'&&a.done&&nearSite(a,135));
   const draftingReady=()=>s.sites.some(a=>a.kind==='drafting'&&a.done&&nearSite(a,135));
-  const toolCrafts=new Set(['pickaxe','copperPickaxe','ironPickaxe','sword','spear','armor','helmet','leggings','boots']);
+  const toolCrafts=new Set(['pickaxe','copperPickaxe','ironPickaxe','sword','spear','bow','armor','helmet','leggings','boots']);
 
   function tileAt(c,r){
     if(c<0||c>=COLS||r>=ROWS)return 2;
@@ -467,11 +471,24 @@
   function showAwards(){checkAwards();showModal('🏆 상장',`<p class="hint">탐험하고 건설하며 획득한 상장 ${Object.keys(s.awards).length}/${Object.keys(achievements).length}</p>
     <div class="award-list">${Object.entries(achievements).map(([id,a])=>{const value=a.stat==='day'?s.day:a.stat==='kills'?s.kills:s.stats[a.stat];
       return `<div class="award ${s.awards[id]?'earned':''}"><span class="award-icon">${a.icon}</span><div><b>${a.name}</b><small>${a.description}</small></div><strong>${s.awards[id]?'획득':`${Math.min(value,a.goal)}/${a.goal}`}</strong></div>`;}).join('')}</div>`);}
-  function attackInterval(){return s.equipped.weapon==='spear'?.62:s.equipped.weapon==='sword'?.36:.46;}
-  function attack(){if(attackCooldown>0)return;attackCooldown=attackInterval();attackFlash=.16;
+  function attackInterval(){return s.equipped.weapon==='bow'?.75:s.equipped.weapon==='spear'?.62:s.equipped.weapon==='sword'?.36:.46;}
+  function fireBow(){if(attackCooldown>0)return;if(!s.inv.arrows){flash('화살이 없어요 · 제작소에서 화살을 만드세요');return;}
+    const direction=bowAim||{x:s.player.facing,y:-.3},magnitude=Math.hypot(direction.x,direction.y)||1,dx=direction.x/magnitude,dy=direction.y/magnitude;
+    s.player.facing=dx<0?-1:1;s.inv.arrows--;attackCooldown=attackInterval();attackFlash=.18;
+    flyingArrows.push({x:s.player.x+dx*13,y:s.player.y+10+dy*13,vx:dx*410,vy:dy*410,life:2.5});renderHotbar();}
+  function attack(){if(s.equipped.weapon==='bow'){fireBow();return;}if(attackCooldown>0)return;attackCooldown=attackInterval();attackFlash=.16;
     const p=s.player,reach=s.equipped.weapon==='spear'?116:77;
     const enemy=s.enemies.filter(e=>Math.abs(e.x-p.x)<reach&&Math.abs(((e.footY??groundY(e.x))-25)-(p.y+14))<74).sort((a,b)=>Math.abs(a.x-p.x)-Math.abs(b.x-p.x))[0];
     if(enemy)damageEnemy(enemy,s.equipped.weapon==='sword'?30:s.equipped.weapon==='spear'?25:18);else flash('공격 범위에 적이 없어요');}
+  function updateArrows(dt){for(let i=flyingArrows.length-1;i>=0;i--){const arrow=flyingArrows[i];let hit=false;
+      const steps=Math.max(1,Math.ceil(Math.hypot(arrow.vx*dt,arrow.vy*dt)/8)),step=dt/steps;
+      for(let j=0;j<steps&&!hit;j++){arrow.x+=arrow.vx*step;arrow.y+=arrow.vy*step;arrow.vy+=610*step;
+        const enemy=s.enemies.find(e=>Math.abs(e.x-arrow.x)<16&&arrow.y>(e.drawY??groundY(e.x))-34&&arrow.y<(e.drawY??groundY(e.x))+2);
+        if(enemy){damageEnemy(enemy,24);hit=true;break;}
+        if(arrow.x<0||arrow.x>=WORLD_W||arrow.y>WORLD_H||tileAt(Math.floor(arrow.x/TILE),Math.floor((arrow.y-ORIGIN)/TILE)))hit=true;
+      }
+      arrow.life-=dt;if(hit||arrow.life<=0)flyingArrows.splice(i,1);
+    }}
   function flatFoundation(x,width,clickedY){const left=Math.floor((x-width*.31)/TILE),right=Math.floor((x+width*.31)/TILE);
     if(left<0||right>=COLS)return null;
     // 자연 지면을 판 뒤 놓은 블록이나 그 위로 쌓은 바닥도 지지대로 인정한다.
@@ -507,7 +524,7 @@
     if(!canPay(recipe.cost)){flash('제작 재료가 부족해요');return;}
     pay(recipe.cost);
     if(gear[kind]){s.ownedGear[kind]=true;s.gearCount[kind]=(s.gearCount[kind]||0)+1;}
-    else s.inv[kind]+=kind==='ladder'?4:1;
+    else s.inv[kind]+=kind==='ladder'?4:kind==='arrows'?8:1;
     celebrateCraft(recipe.name,s.sites.find(a=>a.kind===(toolCrafts.has(kind)?'toolbench':'workshop')&&a.done&&nearSite(a,135)));
     flash(`${recipe.name} 제작 완료 · ${gear[kind]?'장비':'가방'}에서 확인하세요`);showCraft();
   }
@@ -572,9 +589,9 @@
   function hideModal(){$('overlay').classList.remove('open');}
   const slotNames={helmet:'헬멧',armor:'갑옷',legs:'바지',boots:'신발',tool:'곡괭이',weapon:'무기',light:'등불'};
   const slotIcons={helmet:'◕',armor:'▣',legs:'▥',boots:'◧',tool:'⛏',weapon:'⚔',light:'✧'};
-  const itemIcons={stone:'▧',dirt:'▦',wood:'▥',metal:'⬡',copper:'◆',iron:'⬢',fiber:'❀',crystal:'✦',food:'◉',medkit:'⚕',ladder:'╫',chest:'▣',basicSword:'⚔',sword:'⚔',spear:'♠',basicPickaxe:'⛏',pickaxe:'⛏',copperPickaxe:'⛏',ironPickaxe:'⛏',armor:'▣',helmet:'◕',leggings:'▥',boots:'◧',lamp:'✧'};
-  const bagItems=['stone','dirt','wood','metal','copper','iron','fiber','crystal','food','medkit','ladder','chest'];
-  const itemCategory={stone:'block',dirt:'block',wood:'block',metal:'ore',copper:'ore',iron:'ore',fiber:'nature',crystal:'ore',food:'food',medkit:'food',ladder:'building',chest:'building'};
+  const itemIcons={stone:'▧',dirt:'▦',wood:'▥',metal:'⬡',copper:'◆',iron:'⬢',fiber:'❀',crystal:'✦',food:'◉',medkit:'⚕',ladder:'╫',chest:'▣',arrows:'➶',basicSword:'⚔',sword:'⚔',spear:'♠',bow:'🏹',basicPickaxe:'⛏',pickaxe:'⛏',copperPickaxe:'⛏',ironPickaxe:'⛏',armor:'▣',helmet:'◕',leggings:'▥',boots:'◧',lamp:'✧'};
+  const bagItems=['stone','dirt','wood','metal','copper','iron','fiber','crystal','food','medkit','ladder','chest','arrows'];
+  const itemCategory={stone:'block',dirt:'block',wood:'block',metal:'ore',copper:'ore',iron:'ore',fiber:'nature',crystal:'ore',food:'food',medkit:'food',ladder:'building',chest:'building',arrows:'building'};
   function bagCount(id){return gear[id]?Number(!!s.ownedGear[id]):id==='food'?s.food:(s.inv[id]||0);}
   let hotbarSnapshot='';
   function renderHotbar(){const signature=s.hotbarSlot+'|'+s.hotbar.map(id=>`${id}:${bagCount(id)}`).join('|');if(signature===hotbarSnapshot)return;hotbarSnapshot=signature;
@@ -593,7 +610,7 @@
     const armorSlots=['helmet','armor','legs','boots'],handSlots=['tool','weapon','light'];
     const slotButton=slot=>`<button class="bag-equip-slot ${activeSlot===slot?'selected':''}" data-bag-slot="${slot}" ${activeSlot===slot?'data-active-slot="1"':''} aria-label="${slotNames[slot]} 장착 칸 · ${gear[s.equipped[slot]]?.name||'비어 있음'}"><span>${slotIcons[slot]}</span><small>${slotNames[slot]}</small><b>${gear[s.equipped[slot]]?.name||'빈 칸'}</b></button>`;
     const armor=(s.equipped.armor==='armor'?3:0)+(s.equipped.helmet==='helmet'?1:0)+(s.equipped.legs==='leggings'?1:0)+(s.equipped.boots==='boots'?1:0);
-    const attackPower=s.equipped.weapon==='sword'?30:s.equipped.weapon==='spear'?25:18;
+    const attackPower=s.equipped.weapon==='sword'?30:s.equipped.weapon==='spear'?25:s.equipped.weapon==='bow'?24:18;
     const mining=s.equipped.tool==='ironPickaxe'?3:['pickaxe','copperPickaxe'].includes(s.equipped.tool)?2:1;
     const choices=activeSlot?Object.entries(gear).filter(([key,g])=>g.slot===activeSlot&&(s.gearCount[key]||0)>0):[];
     showModal('🎒 가방',`
@@ -806,7 +823,16 @@
   for(const type of ['pointerup','pointercancel','lostpointercapture'])$('mine').addEventListener(type,e=>{if(e.pointerId!==minePointer)return;
     minePointer=null;mineAim=null;held.mine=false;$('mine-stick').style.transform='translate(0,0)';$('mine-direction').textContent='도구 ↕';});
   holdButton('gather','gather',()=>{gatherCooldown=.28;gather();});
-  holdButton('attack','attack',attack);
+  const attackButton=$('attack');
+  attackButton.addEventListener('pointerdown',e=>{e.preventDefault();attackButton.setPointerCapture(e.pointerId);
+    if(s.equipped.weapon==='bow'){bowPointer=e.pointerId;bowAim={x:s.player.facing,y:-.3};attackButton.classList.add('aiming');}
+    else{held.attack=true;attack();}});
+  attackButton.addEventListener('pointermove',e=>{if(e.pointerId!==bowPointer)return;
+    const box=attackButton.getBoundingClientRect(),dx=e.clientX-(box.left+box.width/2),dy=e.clientY-(box.top+box.height/2);
+    if(Math.hypot(dx,dy)>8){bowAim={x:dx,y:dy};if(Math.abs(dx)>7)s.player.facing=Math.sign(dx);}});
+  for(const type of ['pointerup','pointercancel','lostpointercapture'])attackButton.addEventListener(type,e=>{
+    held.attack=false;if(e.pointerId!==bowPointer)return;
+    if(type==='pointerup'&&s.equipped.weapon==='bow')fireBow();bowPointer=null;bowAim=null;attackButton.classList.remove('aiming');});
   $('place-below').addEventListener('pointerdown',e=>{e.preventDefault();placeBelow();});
   $('jump').addEventListener('pointerdown',e=>{e.preventDefault();jump();});
   const keyboard={left:false,right:false,down:false,up:false,mine:false,gather:false,attack:false};
@@ -819,7 +845,7 @@
     if(e.code==='Space'&&!e.repeat){e.preventDefault();jump();}
     if(e.key.toLowerCase()==='e')keyboard.mine=true;
     if(e.key.toLowerCase()==='g')keyboard.gather=true;
-    if(e.key.toLowerCase()==='f')keyboard.attack=true;
+    if(e.key.toLowerCase()==='f'){if(s.equipped.weapon==='bow'){if(!e.repeat)fireBow();}else keyboard.attack=true;}
     if(e.key.toLowerCase()==='i'&&!e.repeat)showBag();
     if(/^[1-8]$/.test(e.key)&&!e.repeat){s.hotbarSlot=Number(e.key)-1;renderHotbar();}});
   addEventListener('keyup',e=>{if(['a','ArrowLeft'].includes(e.key))keyboard.left=false;
@@ -874,6 +900,7 @@
     if(held.gather||keyboard.gather){gatherCooldown-=dt;if(gatherCooldown<=0){gather();gatherCooldown=.28;}}
     attackCooldown=Math.max(0,attackCooldown-dt);attackFlash=Math.max(0,attackFlash-dt);
     if((held.attack||keyboard.attack)&&attackCooldown<=0)attack();
+    updateArrows(dt);
     for(let i=s.drops.length-1;i>=0;i--){const item=s.drops[i];item.age=(item.age||0)+dt;
       if(item.age<.45)continue;
       const dx=p.x-item.x,dy=p.y+12-item.y,dist=Math.hypot(dx,dy);
@@ -1092,6 +1119,10 @@
       ctx.fillStyle=mist;ctx.fillRect(x,y-42,TILE,77);
     }}
   function drawResources(){for(const a of s.resources){let x=a.x,y=groundY(a.x);
+    if(Math.abs(x-s.player.x)<48&&Math.abs((s.player.y+24)-y)<65){
+      const isTree=a.type==='wood',top=isTree?y-115:y-48,width=isTree?56:32;
+      ctx.save();ctx.strokeStyle='#ffe16a';ctx.lineWidth=2.5;ctx.shadowColor='#ffdb43';ctx.shadowBlur=12;
+      ctx.strokeRect(x-width/2,top,width,y-top+2);ctx.restore();}
     if(a.type==='fiber'){rect(x-3,y-28,6,28,'#699280');rect(x-12,y-36,24,15,'#a6c8a0');rect(x+4,y-45,7,16,'#7bb5a0');}
     else if(a.type==='food'){rect(x-3,y-21,6,21,'#557e69');rect(x-12,y-32,24,14,'#6ba780');rect(x-8,y-27,5,5,'#ef9b9e');rect(x+4,y-25,5,5,'#ef9b9e');}
     else if(a.type==='wood'&&biomeAt(x)==='desert'){rect(x-6,y-62,12,62,'#6a876a');rect(x-20,y-46,16,9,'#83ad78');rect(x-19,y-53,7,20,'#5d8d68');rect(x+5,y-35,16,9,'#83ad78');rect(x+15,y-44,7,17,'#5d8d68');}
@@ -1139,6 +1170,15 @@
     if(a.kind!=='outpost'&&!withinOutpost(a.x,siteGroundY(a)))text('⚠',x+info.w-13,y+11,17,'#ff9d84');ctx.restore();}
   }
   function drawConstructionParticles(){for(const v of constructionParticles){ctx.globalAlpha=Math.min(1,v.life*1.8);rect(v.x,v.y,4,4,v.vy<0?'#f4dd9c':'#a7e3d6');ctx.globalAlpha=1;}}
+  function drawArrows(){for(const a of flyingArrows){const angle=Math.atan2(a.vy,a.vx);
+      ctx.save();ctx.translate(a.x,a.y);ctx.rotate(angle);rect(-10,-1,18,2,'#d9c69b');rect(7,-3,5,6,'#dce9db');rect(-11,-4,5,3,'#b2dbd1');rect(-11,1,5,3,'#b2dbd1');ctx.restore();}
+    if(bowAim&&s.equipped.weapon==='bow'){
+      const magnitude=Math.hypot(bowAim.x,bowAim.y)||1,vx=bowAim.x/magnitude*410,vy=bowAim.y/magnitude*410;
+      ctx.fillStyle='#ffe294';for(let t=.12;t<1.7;t+=.13){const x=s.player.x+vx*t,y=s.player.y+10+vy*t+305*t*t;
+        if(tileAt(Math.floor(x/TILE),Math.floor((y-ORIGIN)/TILE)))break;
+        ctx.globalAlpha=Math.max(.25,1-t/2);ctx.beginPath();ctx.arc(x,y,2.5,0,Math.PI*2);ctx.fill();}ctx.globalAlpha=1;
+      text(`화살 ${s.inv.arrows||0}개`,s.player.x-30,s.player.y-19,12,'#ffe29d');
+    }}
   function drawActors(){for(const a of s.allies){const y=a.drawY??groundY(a.x),working=a.farming?Math.sin(performance.now()/170):0;
       rect(a.x-8,y-29+(a.farming?Math.max(0,working)*2:0),16,29,'#cfaa86');rect(a.x-8,y-36,16,10,'#8dc9c0');rect(a.x-5,y-24,10,5,a.equipment?.armor?'#637c91':'#355266');text(a.role==='combat'?'⚔':a.role==='farmer'?'✿':'▣',a.x-7,y-42,12);
       if(a.farming){rect(a.x+9,y-24+working*5,2,20,'#a77d57');rect(a.x+5,y-8+working*5,12,3,'#cbd5bc');
@@ -1153,7 +1193,8 @@
     if(s.equipped.armor==='armor'){rect(x-8,y+9,16,12,'#718e9e');rect(x-5,y+11,10,3,'#b7d0cd');}
     if(s.equipped.legs==='leggings'){rect(x-7,y+19,6,4,'#9aabb1');rect(x+1,y+19,6,4,'#9aabb1');}
     if(s.equipped.boots==='boots'){rect(x-9,y+22,8,3,'#dec18d');rect(x+1,y+22,8,3,'#dec18d');}
-    if(s.equipped.weapon==='sword'||s.equipped.weapon==='spear'){rect(x+p.facing*10,y+9,3,18,'#d9e4df');rect(x+p.facing*10-3,y+18,9,2,'#d7b987');}
+    if(s.equipped.weapon==='bow'){ctx.strokeStyle='#c8a579';ctx.lineWidth=3;ctx.beginPath();ctx.arc(x+p.facing*12,y+12,13,-Math.PI/2,Math.PI/2,p.facing<0);ctx.stroke();rect(x+p.facing*12,y,1,26,'#e5d5a8');}
+    else if(s.equipped.weapon==='sword'||s.equipped.weapon==='spear'){rect(x+p.facing*10,y+9,3,18,'#d9e4df');rect(x+p.facing*10-3,y+18,9,2,'#d7b987');}
     else if(s.equipped.tool&&s.equipped.tool!=='basicPickaxe'){rect(x+p.facing*10,y+9,3,17,'#ba9a75');rect(x+p.facing*10-4,y+7,11,4,s.equipped.tool==='ironPickaxe'?'#c5d9dc':'#d8ab80');}
     if(s.equipped.light==='lamp'){rect(x-p.facing*12,y+7,5,7,'#f5d88d');rect(x-p.facing*13,y+5,7,2,'#fff1be');}
     for(const effect of damageFloats){ctx.globalAlpha=Math.min(1,effect.life*2);ctx.font='bold 17px monospace';ctx.textAlign='center';ctx.lineWidth=3;ctx.strokeStyle='#251b28';ctx.strokeText(effect.text,effect.x,effect.y);ctx.fillStyle=effect.color;ctx.fillText(effect.text,effect.x,effect.y);ctx.globalAlpha=1;}ctx.textAlign='start';
@@ -1194,7 +1235,7 @@
     m.fillStyle='#0a1c29';m.fillRect(px-3,py-3,7,7);m.fillStyle='#fff0ac';m.fillRect(px-2,py-2,5,5);
   }
   function draw(){ctx.setTransform(scale,0,0,scale,0,0);ctx.fillStyle='#142134';ctx.fillRect(0,0,logicalW,logicalH);
-    ctx.save();ctx.translate(-viewX,-viewY);drawBackground();drawTerrain();drawSurfaceMist();drawResources();drawDrops();drawSites();drawConstructionParticles();drawChests();drawActors();ctx.restore();
+    ctx.save();ctx.translate(-viewX,-viewY);drawBackground();drawTerrain();drawSurfaceMist();drawResources();drawDrops();drawSites();drawConstructionParticles();drawChests();drawActors();drawArrows();ctx.restore();
     drawDarkness();if(phase()==='밤')rect(0,0,logicalW,logicalH,'#10112b22');
     if(hurtClock>0){rect(0,0,logicalW,logicalH,`rgba(199,40,64,${hurtClock*.26})`);
       ctx.strokeStyle=`rgba(255,117,130,${hurtClock})`;ctx.lineWidth=12;ctx.strokeRect(6,6,logicalW-12,logicalH-12);}
@@ -1218,6 +1259,8 @@
     temp.classList.toggle('hot',biome==='desert');temp.classList.toggle('cold',biome==='tundra');
     $('awards').textContent=`🏆 ${Object.keys(s.awards).length}`;
     $('attack').style.setProperty('--cooldown',`${Math.round(100*attackCooldown/attackInterval())}%`);
+    $('attack-label').textContent=s.equipped.weapon==='bow'?'조준 · 놓기':'공격';
+    $('attack-icon').textContent=s.equipped.weapon==='bow'?'🏹':'⚔';
     $('attack-speed').textContent=`${(1/attackInterval()).toFixed(1)}/초`;
     renderHotbar();
     const site=s.sites.find(a=>!a.done&&nearSite(a,90));
