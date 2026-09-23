@@ -877,7 +877,8 @@
   function text(str,x,y,size=12,color='#edf5ea'){ctx.font=`bold ${size}px monospace`;ctx.fillStyle=color;ctx.fillText(str,Math.round(x),Math.round(y));}
   function drawBackground(){const night=phase()==='밤';let sky=ctx.createLinearGradient(0,-120,0,490);
     sky.addColorStop(0,night?'#111c3b':'#315a77');sky.addColorStop(.62,night?'#38405e':'#7093a0');sky.addColorStop(1,night?'#54526a':'#b7adb0');
-    ctx.fillStyle=sky;ctx.fillRect(-logicalW,-logicalH-100,WORLD_W+logicalW*2,WORLD_H+logicalH+100);
+    // 화면에 보이는 부분만 칠한다. 큰 월드 전체를 매 프레임 그리면 모바일 Safari가 멈출 수 있다.
+    ctx.fillStyle=sky;ctx.fillRect(viewX,viewY,logicalW,logicalH);
     const left=Math.max(0,Math.floor(viewX/TILE)-1),right=Math.min(COLS-1,Math.ceil((viewX+logicalW)/TILE)+1);
     for(let c=left;c<=right;c++){const x=c*TILE,y=groundY(x),zone=biomeAt(x);
       const blend=(edge)=>clamp((x-edge+260)/520,0,1);
@@ -893,17 +894,21 @@
       ctx.fillStyle=mist;ctx.fillRect(x,ridge-45,TILE,150);
     }
     for(let i=0;i<1160;i++){const x=(i*373+83)%WORLD_W,y=11+(i*79)%280;
+      if(x<viewX-5||x>viewX+logicalW+5)continue;
       if(y<groundY(x)-17)rect(x,y,i%8===0?3:2,2,night?'#c6def0':'#9cbfc8');}
     for(let i=0;i<130;i++){const zone=i%65<30?'desert':'tundra',base=(zone==='desert'?3000:7500)+(i>=65?12280:0),span=zone==='desert'?2300:3000;
       const x=base+(i*317+performance.now()*(zone==='desert'?.009:.003))%span,y=(i*79+performance.now()*.015)%280;
+      if(x<viewX-8||x>viewX+logicalW+8)continue;
       if(y<groundY(x)-15)rect(x,y,zone==='desert'?4:3,zone==='desert'?1:3,zone==='desert'?'#f2d9a77d':'#e2f9efcc');}
     rect(1650,35,65,65,night?'#b6a4b7':'#d0bfa2');
     rect(1662,44,18,13,night?'#817897':'#aaa08e');
     for(let i=0;i<148;i++){const x=i*169+(i*37)%61,height=22+Math.floor(hash(i,3)*39),width=18+Math.floor(hash(i,9)*28),y=groundY(x);
+      if(x+width<viewX||x>viewX+logicalW)continue;
       if(!naturalSpace(x))continue;
       rect(x,y-height,width,height,night?'#41546888':'#667d8299');
       rect(x+5,y-height-6,width-10,7,night?'#607181aa':'#98a9a7aa');}
     for(let i=0;i<276;i++){const x=i*88+19,v=hash(i,17),biome=Math.floor(x/760)%3,y=groundY(x),zone=biomeAt(x);
+      if(x+55<viewX||x-55>viewX+logicalW)continue;
       if(!naturalSpace(x))continue;
       if(zone==='desert'){rect(x-2,y-27,9,27,'#4b8772');rect(x-8,y-20,7,5,'#6bac83');rect(x-8,y-23,3,9,'#4b8772');rect(x+5,y-15,8,5,'#6bac83');rect(x+10,y-19,3,9,'#4b8772');continue;}
       if(zone==='tundra'){rect(x+1,y-37,5,37,'#536c72');rect(x-18,y-26,40,12,'#527b80');rect(x-13,y-41,30,13,'#6b969b');rect(x-7,y-54,18,16,'#a8ced1');rect(x-19,y-28,38,4,'#e1ecdd');continue;}
@@ -913,10 +918,10 @@
         rect(x+6,y-height-8,width-12,10,biome===1?'#acb4d0':biome===2?'#c89fbb':'#abcfc0');
         rect(x+8,y-height+7,3,3,'#e5d9b6');}
       else{rect(x+2,y-20,5,20,'#507e6e');rect(x-5,y-27,21,12,biome===2?'#a780ad':'#81b99d');}}
-    for(const x0 of [316,1280,2040,3310,4860,5600,7120,8360,10320,11480])for(const x of [x0,x0+12280]){const y=groundY(x);if(!naturalSpace(x))continue;
+    for(const x0 of [316,1280,2040,3310,4860,5600,7120,8360,10320,11480])for(const x of [x0,x0+12280]){if(x+30<viewX||x-30>viewX+logicalW)continue;const y=groundY(x);if(!naturalSpace(x))continue;
       rect(x-16,y-35,33,35,'#637d8c');rect(x-9,y-63,20,30,'#85b8bd');
       rect(x-3,y-89,8,28,'#a2e1d4');rect(x+6,y-42,14,16,'#709caf');}
-    for(const x0 of [600,1770,3890,5280,6940,8550,10560])for(const x of [x0,x0+12280]){const y=groundY(x);if(!naturalSpace(x))continue;
+    for(const x0 of [600,1770,3890,5280,6940,8550,10560])for(const x of [x0,x0+12280]){if(x+35<viewX||x-35>viewX+logicalW)continue;const y=groundY(x);if(!naturalSpace(x))continue;
       rect(x-31,y-67,12,67,'#677b85');rect(x+20,y-67,12,67,'#677b85');
       rect(x-30,y-76,62,12,'#8fa1a1');rect(x-4,y-92,9,16,'#a2c3b8');}
   }
