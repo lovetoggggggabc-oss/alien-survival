@@ -101,7 +101,8 @@
   s.drops=Array.isArray(s.drops)?s.drops:[];
   s.nextSiteId=Number(s.nextSiteId)||1;s.nextAllyId=Number(s.nextAllyId)||1;s.pendingBedOffers||=[];
   for(const site of s.sites){site.id??=s.nextSiteId++;s.nextSiteId=Math.max(s.nextSiteId,site.id+1);
-    if(site.kind==='bed'&&site.done)site.completedDay??=s.day;}
+    if(site.kind==='bed'&&site.done)site.completedDay??=s.day;
+    if(site.kind==='farm'){site.cropProgress=Math.max(0,Math.min(100,Number(site.cropProgress)||0));site.cropClock=Number(site.cropClock)||0;}}
   for(const ally of s.allies){ally.id??=s.nextAllyId++;s.nextAllyId=Math.max(s.nextAllyId,ally.id+1);
     ally.role=({guard:'combat',gather:'farmer',haul:'builder'})[ally.role]||ally.role;
     ally.maxHp=Number(ally.maxHp)||Math.max(40,Number(ally.hp)||40);
@@ -193,6 +194,8 @@
     s.player.vy=0;s.damage={};
   }
   if(s.version<8)for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(s.terrain[r][c]===3)s.terrain[r][c]=oreType(c,r);
+  // 채굴 중단 상태는 저장된 월드에서도 다시 표시하지 않는다.
+  s.damage={};
   s.version=12;
   const random=(a,b)=>a+Math.random()*(b-a);
   const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
@@ -219,7 +222,7 @@
     for(const dx of [74,-74,112,-112,145,-145]){const x=clamp(s.player.x+dx,56,WORLD_W-56);if(resourceSpace(x)){s.resources.push({x,type:'wood',hp:3});break;}}
 
   let logicalW=420,logicalH=780,scale=1,viewX=0,viewY=0;
-  let speed=1,mode=null,targetTile=null,previewX=null,previewY=null;
+  let speed=1,mode=null,targetTile=null,previewX=null,previewY=null,mineAim=null,minePointer=null,mineTargetKey=null,lastMineAt=0;
   let last=performance.now(),mineCooldown=0,gatherCooldown=0,attackCooldown=0,spawnCooldown=0,caveSpawnCooldown=5,saveClock=0,toastClock=0,hitClock=0,hitTile=null,blockImpact=null;
   let hurtClock=0,deathClock=0,painTimer=0,attackFlash=0,craftResult='',craftResultClock=0;
   const damageFloats=[],constructionParticles=[];
@@ -247,6 +250,12 @@
   const phase=()=>s.time%CYCLE<DAY?'낮':'밤';
   const nearSurface=()=>s.player.y<groundY(s.player.x)+45;
   function siteGroundY(site){return site.y??groundY(site.x);}
+  function assignedFarmer(site){return s.allies.find(a=>a.role==='farmer'&&a.farmId===site.id);}
+  function harvestFarm(site){if(!site.done||site.kind!=='farm'||(site.cropProgress||0)<100)return false;
+    const fiber=site.crop==='fiber';if(fiber)s.inv.fiber+=15;else s.food+=15;
+    site.cropProgress=0;site.cropClock=0;damageFloats.push({x:site.x,y:siteGroundY(site)-46,text:`${fiber?'섬유':'식량'} +15`,life:1,color:'#bdeca4'});
+    save(true);flash(`${fiber?'섬유':'식량'} 15개 수확!`);return true;
+  }
   const nearSite=(site,radius=115)=>Math.abs(s.player.x-site.x)<radius&&Math.abs(s.player.y+24-siteGroundY(site))<85;
   const withinOutpost=(x,y)=>s.sites.some(a=>a.kind==='outpost'&&a.done&&Math.abs(x-a.x)<=18*TILE&&Math.abs(y-siteGroundY(a))<=18*TILE);
   const nearCampfire=()=>s.sites.some(a=>a.kind==='campfire'&&a.done&&Math.hypot(s.player.x-a.x,s.player.y+24-siteGroundY(a))<=8*TILE);
@@ -363,17 +372,21 @@
   function inReach(c,r){const x=c*TILE+TILE/2,y=ORIGIN+r*TILE+TILE/2;
     return Math.hypot(x-s.player.x,y-(s.player.y+12))<76;}
   function selectDigTile(){
-    if(targetTile&&Math.abs(joystick.x)<.25&&Math.abs(joystick.y)<.25&&inReach(targetTile.c,targetTile.r)&&tileAt(targetTile.c,targetTile.r))return targetTile;
-    const p=s.player,down=s.settings.controlMode==='keyboard'?keyboard.down:joystick.y>.37,up=s.settings.controlMode==='keyboard'?keyboard.up:joystick.y<-.55;
-    const choices=down?[[p.x,p.y+33],[p.x+p.facing*23,p.y+35]]:
-      up?[[p.x,p.y-13],[p.x+p.facing*23,p.y+2]]:
-      [[p.x+p.facing*23,p.y+12],[p.x+p.facing*23,p.y+25],[p.x,p.y+33]];
+    if(targetTile&&!mineAim&&Math.abs(joystick.x)<.25&&Math.abs(joystick.y)<.25&&inReach(targetTile.c,targetTile.r)&&tileAt(targetTile.c,targetTile.r))return targetTile;
+    const p=s.player,down=mineAim?mineAim.y>.32:s.settings.controlMode==='keyboard'?keyboard.down:joystick.y>.37,
+      up=mineAim?mineAim.y<-.32:s.settings.controlMode==='keyboard'?keyboard.up:joystick.y<-.55;
+    const facing=mineAim&&Math.abs(mineAim.x)>.35?Math.sign(mineAim.x):p.facing;
+    const choices=down?[[p.x,p.y+33],[p.x+facing*23,p.y+35]]:
+      up?[[p.x,p.y-13],[p.x+facing*23,p.y+2]]:
+      [[p.x+facing*23,p.y+12],[p.x+facing*23,p.y+25],[p.x,p.y+33]];
     for(const [x,y] of choices){let c=Math.floor(x/TILE),r=Math.floor((y-ORIGIN)/TILE);
       if(tileAt(c,r)&&inReach(c,r))return {c,r};}
     return null;
   }
   const blockHp=type=>type===1?3:type===5?4:type===2?6:type===3||type===6?8:type===7?10:9;
+  function clearMiningCracks(){s.damage={};hitTile=null;hitClock=0;mineTargetKey=null;lastMineAt=0;}
   function dig(c,r){if(c<0||c>=COLS||r<0||r>=ROWS)return false;const type=tileAt(c,r);if(!type||!inReach(c,r))return false;
+    const miningKey=`${c},${r}`;if(mineTargetKey&&mineTargetKey!==miningKey)clearMiningCracks();mineTargetKey=miningKey;lastMineAt=performance.now();
     if(supportsStructure(c,r)){flash('건물이나 상자를 받치는 블록은 캘 수 없어요 · 건물 철거를 이용하세요');return true;}
     const key=`${c},${r}`;s.damage ||= {};
     const power=s.equipped.tool==='ironPickaxe'?3:['pickaxe','copperPickaxe'].includes(s.equipped.tool)?2:1;
@@ -382,7 +395,7 @@
     if(s.damage[key]>=hp){
       if(s.placedBlocks[key])delete s.placedBlocks[key];else if(r>=0)s.terrain[r][c]=0;
       delete s.damage[key];delete s.enemyDamage[key];const gain=type===1?'dirt':type===3?'metal':type===4?'crystal':type===5?'wood':type===6?'copper':type===7?'iron':'stone';
-      dropItem(gain,c*TILE+TILE/2,ORIGIN+r*TILE+TILE/2);s.stats.blocksMined++;checkAwards();flash(`${names[gain]} 드롭 · 가까이 가서 줍기`);targetTile=null;
+      dropItem(gain,c*TILE+TILE/2,ORIGIN+r*TILE+TILE/2);s.stats.blocksMined++;checkAwards();flash(`${names[gain]} 드롭 · 가까이 가서 줍기`);targetTile=null;mineTargetKey=null;
     }
     else flash('광물을 캐는 중…');
     return true;
@@ -611,8 +624,14 @@
       ${!available.length?'<p class="section-note">제작한 다른 설계도가 아직 없어요.</p>':''}
       <h3>주변 건물 관리 · 다음 날 철거</h3>${nearby.length?nearby.map(a=>`<div class="recipe"><div><b>${buildings[a.kind].icon} ${buildings[a.kind].name}</b><small>${a.demolishDay?`${a.demolishDay}일차 철거 예약`:'터치해서 철거 예약 또는 취소'}</small></div><button data-manage-site="${a.id}">관리</button></div>`).join(''):'<p class="section-note">건물 가까이 가거나 건물을 직접 터치해 관리하세요.</p>'}`);}
   function showSiteManagement(site){if(!s.sites.includes(site))return;
-    showModal(`${buildings[site.kind].icon} ${buildings[site.kind].name}`,`<p class="hint">${site.done?'건설 완료':'건설 중'} · 건물은 바닥 블록이 없어지면 무너집니다.</p>
-      ${site.kind==='farm'?`<h3>재배할 작물</h3><p class="section-note">현재: ${site.crop==='fiber'?'섬유':'식량'} · 완성된 재배실은 매일 아침 선택한 작물을 15개 생산합니다.</p><div class="ally-choices"><button data-farm-crop="${site.id}:food" ${site.crop!=='fiber'?'disabled':''}>▣ 식량 재배</button><button data-farm-crop="${site.id}:fiber" ${site.crop==='fiber'?'disabled':''}>✿ 섬유 재배</button></div>`:''}
+    showModal(`${buildings[site.kind].icon} ${buildings[site.kind].name}${site.kind==='farm'?` #${site.id}`:''}`,`<p class="hint">${site.done?'건설 완료':'건설 중'} · 건물은 바닥 블록이 없어지면 무너집니다.</p>
+      ${site.kind==='farm'?`<h3>재배할 작물</h3><p class="section-note">현재: ${site.crop==='fiber'?'섬유':'식량'} · 재배 ${(site.cropProgress||0).toFixed(0)}/100 · 완료 시 15개 수확</p>
+      <div class="ally-choices"><button data-farm-crop="${site.id}:food" ${site.crop!=='fiber'?'disabled':''}>▣ 식량 재배</button><button data-farm-crop="${site.id}:fiber" ${site.crop==='fiber'?'disabled':''}>✿ 섬유 재배</button></div>
+      <div class="farm-progress"><div style="width:${Math.min(100,site.cropProgress||0)}%"></div></div>
+      ${site.done?`<div class="ally-choices"><button data-farm-tend="${site.id}" ${(site.cropProgress||0)>=100?'disabled':''}>✿ 재배 +1</button><button data-farm-harvest="${site.id}" ${(site.cropProgress||0)<100?'disabled':''}>▣ 수확 15개</button></div>`:'<p class="section-note">건설이 완료되면 재배할 수 있어요.</p>'}
+      <h3>농부 배치 · 재배실당 1명</h3><p class="section-note">현재 ${assignedFarmer(site)?`동료 ${s.allies.indexOf(assignedFarmer(site))+1}번 농부`:'배치된 농부 없음'} · 배치된 농부가 재배를 대신합니다.</p>
+      ${s.allies.filter(a=>a.role==='farmer').map(a=>`<button class="farm-assign" data-assign-farmer="${site.id}:${a.id}">동료 ${s.allies.indexOf(a)+1}번 농부 ${a.farmId===site.id?'· 배치 중':a.farmId?`· 다른 재배실 #${a.farmId}`:'· 대기 중'}</button>`).join('')||'<p class="section-note">농부 동료가 아직 없어요.</p>'}
+      ${assignedFarmer(site)?`<button class="farm-assign" data-assign-farmer="${site.id}:0">농부 배치 해제</button>`:''}`:''}
       ${site.demolishDay?`<p class="section-note">${site.demolishDay}일차 아침에 철거 예정</p><button data-undo-demolish="${site.id}">철거 취소</button>`:
       `<button data-demolish="${site.id}">다음 날 철거하기</button>`}`);}
   function showCraft(){const ready=workshopReady(),toolReady=toolbenchReady();
@@ -645,7 +664,7 @@
     showModal('✦ 동료',`<p class="hint">침대가 완성된 다음 날 동료의 역할을 고릅니다. 각 동료는 매일 식량 10개를 먹고, 식량이 부족하면 떠납니다.</p>
     <p class="section-note">동료 ${s.allies.length}명 · 전초기지 안의 침대 ${eligibleBeds().length}개 · 매일 필요한 식량 ${s.allies.length*10}개</p>
     ${offers.map((id,i)=>`<div class="ally-offer"><b>✦ 새 동료 ${i+1} · 역할 선택</b><div class="ally-choices"><button data-choose-ally="${id}:combat">⚔ 전투<small>체력 80~120 · 적 공격</small></button><button data-choose-ally="${id}:farmer">✿ 농부<small>체력 40~80 · 농사</small></button><button data-choose-ally="${id}:builder">⌑ 건설<small>체력 40~80 · 자재 운반</small></button></div></div>`).join('')}
-    ${s.allies.map((a,i)=>`<div class="recipe"><div><b>${i+1}번 동료 · ${roleName[a.role]||'건설'} · ♥${Math.ceil(a.hp)}/${a.maxHp}</b><small>장비 ${Object.values(a.equipment||{}).filter(Boolean).length}개 · 전초기지 30블록 이내</small></div><button data-ally-gear="${i}">장비</button></div>`).join('')}`);}
+    ${s.allies.map((a,i)=>`<div class="recipe"><div><b>${i+1}번 동료 · ${roleName[a.role]||'건설'} · ♥${Math.ceil(a.hp)}/${a.maxHp}</b><small>장비 ${Object.values(a.equipment||{}).filter(Boolean).length}개 · ${a.role==='farmer'?(s.sites.some(site=>site.kind==='farm'&&site.id===a.farmId)?`재배실 #${a.farmId} 배치`:'재배실 미배치'):'전초기지 30블록 이내'}</small></div><button data-ally-gear="${i}">장비</button></div>`).join('')}`);}
   function showAllyEquipment(index){const ally=s.allies[index];if(!ally)return;ally.equipment||={};
     showModal(`⚔ ${index+1}번 동료 장비`,`<p class="hint">${roleName[ally.role]} · 체력 ${Math.ceil(ally.hp)}/${ally.maxHp} · 장비 한 벌은 한 명만 사용할 수 있어요.</p>
       <div class="equipment-layout"><div class="body-slots">${['helmet','armor','legs','boots'].map(slot=>`<div class="equip-slot"><span class="equip-icon">${slotIcons[slot]}</span><span>${slotNames[slot]}<b>${gear[ally.equipment[slot]]?.name||'빈 칸'}</b></span></div>`).join('')}</div>
@@ -660,7 +679,14 @@
     if(b.dataset.craft)craft(b.dataset.craft);
     if(b.dataset.manageSite){const site=s.sites.find(a=>a.id===Number(b.dataset.manageSite));if(site)showSiteManagement(site);}
     if(b.dataset.farmCrop){const [id,crop]=b.dataset.farmCrop.split(':'),site=s.sites.find(a=>a.id===Number(id)&&a.kind==='farm');
-      if(site&&['food','fiber'].includes(crop)){site.crop=crop;save(true);showSiteManagement(site);flash(`재배실: ${crop==='fiber'?'섬유':'식량'} 재배 선택`);}}
+      if(site&&['food','fiber'].includes(crop)&&site.crop!==crop){site.crop=crop;site.cropProgress=0;site.cropClock=0;save(true);showSiteManagement(site);flash(`재배실: ${crop==='fiber'?'섬유':'식량'} 재배 선택`);}}
+    if(b.dataset.farmTend){const site=s.sites.find(a=>a.id===Number(b.dataset.farmTend)&&a.kind==='farm'&&a.done);
+      if(site&&(site.cropProgress||0)<100){site.cropProgress=Math.min(100,(site.cropProgress||0)+1);if(site.cropProgress%10===0)save(true);showSiteManagement(site);}}
+    if(b.dataset.farmHarvest){const site=s.sites.find(a=>a.id===Number(b.dataset.farmHarvest)&&a.kind==='farm');if(site&&harvestFarm(site))showSiteManagement(site);}
+    if(b.dataset.assignFarmer){const [siteId,allyId]=b.dataset.assignFarmer.split(':').map(Number),site=s.sites.find(a=>a.id===siteId&&a.kind==='farm');
+      if(site){if(allyId===0){const old=assignedFarmer(site);if(old)delete old.farmId;}
+        else{const ally=s.allies.find(a=>a.id===allyId&&a.role==='farmer');if(ally){const old=assignedFarmer(site);if(old&&old!==ally)delete old.farmId;ally.farmId=site.id;}}
+        save(true);showSiteManagement(site);}}
     if(b.dataset.chooseAlly){const [id,role]=b.dataset.chooseAlly.split(':');chooseAlly(Number(id),role);}
     if(b.dataset.allyGear!==undefined)showAllyEquipment(Number(b.dataset.allyGear));
     if(b.dataset.allyBack)showAllies();
@@ -714,7 +740,7 @@
     if(i===s.hotbarSlot)useHotbar();else{s.hotbarSlot=i;flash(`${names[s.hotbar[i]]} 선택 · 다시 누르면 사용`);}renderHotbar();});
   document.addEventListener('pointerdown',e=>{const b=e.target.closest('button');if(b&&!b.disabled)b.classList.add('pressed');});
   for(const type of ['pointerup','pointercancel'])document.addEventListener(type,()=>document.querySelectorAll('button.pressed').forEach(b=>b.classList.remove('pressed')));
-  $('cancel-mode').onclick=()=>{mode=null;previewX=null;previewY=null;flash('선택을 취소했어요');};
+  $('cancel-mode').onclick=()=>{mode=null;targetTile=null;previewX=null;previewY=null;clearMiningCracks();flash('선택을 취소했어요');};
   $('speed').onclick=()=>{speed=speed===1?10:1;$('speed').textContent=`×${speed}`;flash(`시간 속도 ×${speed}`);};
   document.documentElement.style.setProperty('--joy-size',`${clamp(s.settings.joystickSize,80,200)}px`);
   document.documentElement.style.setProperty('--action-size',`${s.settings.actionSize}px`);
@@ -767,7 +793,18 @@
   for(const type of ['pointerup','pointercancel','lostpointercapture'])joy.addEventListener(type,releaseJoy);
   function holdButton(id,key,action){const b=$(id);b.addEventListener('pointerdown',e=>{e.preventDefault();b.setPointerCapture(e.pointerId);held[key]=true;action();});
     for(const type of ['pointerup','pointercancel','lostpointercapture'])b.addEventListener(type,()=>held[key]=false);}
-  holdButton('mine','mine',()=>{mineCooldown=.28;mine();});
+  function updateMineJoystick(e){const box=$('mine').getBoundingClientRect(),dx=(e.clientX-(box.left+box.width/2))/(box.width*.32),dy=(e.clientY-(box.top+box.height/2))/(box.height*.32),length=Math.max(1,Math.hypot(dx,dy));
+    mineAim={x:dx/length,y:dy/length};
+    $('mine-stick').style.transform=`translate(${mineAim.x*11}px,${mineAim.y*11}px)`;
+    $('mine-direction').textContent=mineAim.y<-.32?'위 채굴':mineAim.y>.32?'아래 채굴':mineAim.x<-.35?'왼쪽 채굴':mineAim.x>.35?'오른쪽 채굴':'앞 채굴';
+    if(Math.abs(mineAim.x)>.35&&Math.abs(mineAim.y)<.58)s.player.facing=Math.sign(mineAim.x);
+    targetTile=null;
+  }
+  $('mine').addEventListener('pointerdown',e=>{e.preventDefault();$('mine').setPointerCapture(e.pointerId);minePointer=e.pointerId;
+    held.mine=true;updateMineJoystick(e);mineCooldown=.28;mine();});
+  $('mine').addEventListener('pointermove',e=>{if(e.pointerId===minePointer)updateMineJoystick(e);});
+  for(const type of ['pointerup','pointercancel','lostpointercapture'])$('mine').addEventListener(type,e=>{if(e.pointerId!==minePointer)return;
+    minePointer=null;mineAim=null;held.mine=false;$('mine-stick').style.transform='translate(0,0)';$('mine-direction').textContent='도구 ↕';});
   holdButton('gather','gather',()=>{gatherCooldown=.28;gather();});
   holdButton('attack','attack',attack);
   $('place-below').addEventListener('pointerdown',e=>{e.preventDefault();placeBelow();});
@@ -804,8 +841,9 @@
     if(chest){showChest(chest);return;}
     const site=s.sites.find(a=>Math.abs(a.x-p.x)<buildings[a.kind].w*.32&&p.y>=siteGroundY(a)-buildings[a.kind].h*.7&&p.y<=siteGroundY(a)+7);
     if(site){if(Math.abs(site.x-s.player.x)<150&&Math.abs(siteGroundY(site)-(s.player.y+24))<95)showSiteManagement(site);else flash('건물 가까이에서 터치하세요');return;}
-    if(c>=0&&c<COLS&&r>=0&&r<ROWS&&tileAt(c,r)&&inReach(c,r)){targetTile={c,r};flash('선택한 블록을 도구 버튼이나 E키로 파세요');}
-    else targetTile=null;
+    if(c>=0&&c<COLS&&r>=0&&r<ROWS&&tileAt(c,r)&&inReach(c,r)){
+      if(mineTargetKey&&mineTargetKey!==`${c},${r}`)clearMiningCracks();targetTile={c,r};flash('선택한 블록을 도구 버튼이나 E키로 파세요');}
+    else{targetTile=null;clearMiningCracks();}
   });
 
   function clearOutsideOutposts(){let removed=0;
@@ -832,6 +870,7 @@
     if(ladder&&(joystick.y<-.25||keyboard.up)){p.vy=0;moveAxis(-105*dt,'y');}
     else{p.vy=clamp(p.vy+710*dt,-380,370);if(moveAxis(p.vy*dt,'y'))p.vy=0;}
     if(held.mine||keyboard.mine){mineCooldown-=dt;if(mineCooldown<=0){mine();mineCooldown=.28;}}
+    else if(lastMineAt&&performance.now()-lastMineAt>3000){clearMiningCracks();lastMineAt=0;}
     if(held.gather||keyboard.gather){gatherCooldown-=dt;if(gatherCooldown<=0){gather();gatherCooldown=.28;}}
     attackCooldown=Math.max(0,attackCooldown-dt);attackFlash=Math.max(0,attackFlash-dt);
     if((held.attack||keyboard.attack)&&attackCooldown<=0)attack();
@@ -858,7 +897,7 @@
     if(s.temperature>=39||s.temperature<=34)takeDamage(gameDt*.12);
     if(s.hp<=0){respawn(true);return;}
     if(Math.floor(s.time/CYCLE)>prev){s.day++;const demolished=processDemolitions(),cleared=clearOutsideOutposts();
-      for(const site of s.sites)if(site.done&&site.kind==='farm'){if(site.crop==='fiber')s.inv.fiber+=15;else s.food+=15;}
+      // 재배실은 완료된 밭을 수확할 때 생산한다. 날짜가 바뀌어도 진행도는 유지한다.
       assignLegacyBeds();const activeBeds=new Set(eligibleBeds().map(a=>a.id));let bedless=0;
       for(const ally of [...s.allies])if(ally.bedId&&!activeBeds.has(ally.bedId)){s.allies.splice(s.allies.indexOf(ally),1);bedless++;}
       scheduleBedOffers();let departed=0;
@@ -904,9 +943,12 @@
       if(home&&a.x>=minimum&&a.x<=maximum){
         if(a.role==='builder'){const site=s.sites.find(t=>!t.done&&t.x>=minimum&&t.x<=maximum);
           if(site){destination=site.x-24;if(Math.abs(a.x-site.x)<70&&a.work<=0&&!supplied(site)){deliver(site,false);a.work=2;}}}
-        else if(a.role==='farmer'&&phase()==='낮'){const farm=s.sites.filter(t=>t.kind==='farm'&&t.done&&t.x>=minimum&&t.x<=maximum).sort((u,v)=>Math.abs(u.x-a.x)-Math.abs(v.x-a.x))[0];
+        else if(a.role==='farmer'&&phase()==='낮'){const farm=s.sites.find(t=>t.id===a.farmId&&t.kind==='farm'&&t.done&&t.x>=minimum&&t.x<=maximum);
           if(farm){destination=farm.x+Math.sin(s.time*.17+s.allies.indexOf(a)*2)*21;
-            if(Math.abs(a.x-farm.x)<43&&Math.abs(a.footY-siteGroundY(farm))<34)a.farming=true;}}
+            if(Math.abs(a.x-farm.x)<43&&Math.abs(a.footY-siteGroundY(farm))<34){a.farming=true;
+              farm.cropClock=(farm.cropClock||0)+gameDt;
+              if(farm.cropClock>=4){farm.cropClock-=4;farm.cropProgress=Math.min(100,(farm.cropProgress||0)+1);
+                if(farm.cropProgress===100)damageFloats.push({x:farm.x,y:siteGroundY(farm)-48,text:'수확 가능!',life:1,color:'#d9e99e'});}}}}
         else if(a.role==='combat')destination=base+(s.allies.indexOf(a)%3-1)*70;
       }
       destination=clamp(destination,minimum+10,maximum-10);
@@ -1087,7 +1129,7 @@
     else if(a.kind==='toolbench'){rect(x,y+23,info.w,info.h-23,'#605952');rect(x+5,y+15,info.w-10,13,'#b49b78');
       rect(x+12,y+30,15,20,'#45717b');rect(x+52,y+29,16,21,'#527789');rect(x+30,y+9,23,7,'#aac6c4');text('⚒',x+36,y+9,16,'#e7deaa');}
     else if(a.kind==='bed'){rect(x,y+17,info.w,info.h-17,'#657889');rect(x+5,y+11,info.w-10,17,'#caa883');rect(x+7,y+13,16,10,'#dee2cc');}
-    else if(a.kind==='farm'){const fiber=a.crop==='fiber';rect(x,y+23,info.w,25,'#70605c');for(let j=0;j<6;j++){rect(x+j*16+8,y+9,4,17,fiber?'#95b8bd':'#70b992');rect(x+j*16+4,y+5,11,7,fiber?'#bfd7cf':'#addd92');}text(fiber?'섬유':'식량',x+24,y+3,12,'#e2f3d5');}
+    else if(a.kind==='farm'){const fiber=a.crop==='fiber';rect(x,y+23,info.w,25,'#70605c');for(let j=0;j<6;j++){rect(x+j*16+8,y+9,4,17,fiber?'#95b8bd':'#70b992');rect(x+j*16+4,y+5,11,7,fiber?'#bfd7cf':'#addd92');}text(`${fiber?'섬유':'식량'} ${Math.round(a.cropProgress||0)}/100`,x+6,y+3,13,'#e2f3d5');}
     else{rect(x,y,info.w,info.h,'#718792');for(let j=0;j<3;j++)rect(x+6,y+9+j*27,20,15,'#9eafb1');}
     if(a.completeFlash>0){const pulse=a.completeFlash;
       ctx.strokeStyle=`rgba(255,224,149,${Math.min(1,pulse)})`;ctx.lineWidth=4;ctx.strokeRect(x-11*pulse,y-11*pulse,info.w+22*pulse,info.h+22*pulse);
@@ -1159,7 +1201,10 @@
     if(deathClock>0)rect(0,0,logicalW,logicalH,`rgba(228,236,247,${Math.min(.65,deathClock*.48)})`);
     drawMinimap();
   }
-  function updateHud(){const rem=phase()==='낮'?DAY-s.time%CYCLE:CYCLE-s.time%CYCLE;
+  let lastHudTop=-1;
+  function updateHud(){const topBottom=$('top').getBoundingClientRect().bottom;
+    if(Number.isFinite(topBottom)&&Math.abs(topBottom-lastHudTop)>1){lastHudTop=topBottom;document.documentElement.style.setProperty('--hud-top-end',`${Math.ceil(topBottom)}px`);}
+    const rem=phase()==='낮'?DAY-s.time%CYCLE:CYCLE-s.time%CYCLE;
     $('clock').textContent=`${phase()==='낮'?'☀ 낮':'☾ 밤'} ${s.day}일차 · ${Math.floor(rem/60)}:${String(Math.floor(rem%60)).padStart(2,'0')} · ♥${Math.ceil(s.hp)}`;
     $('materials').textContent=`돌 ${s.inv.stone}  구리 ${s.inv.copper}  철 ${s.inv.iron}  나무 ${s.inv.wood}  식량 ${s.food}  하루 필요 ${s.allies.length*10}  동료 ${s.allies.length}`;
     $('daily-food').textContent=`🍞 매일 필요한 식량 ${s.allies.length*10}개 · 보유 ${s.food}개`;
