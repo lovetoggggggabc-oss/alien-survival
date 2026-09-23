@@ -91,7 +91,13 @@
   s.upgrades = {...initial().upgrades,...s.upgrades};
   s.player = {...initial().player,...s.player};
   s.lastBiome||=biomeAt(s.player.x);
-  s.sites ||= []; s.allies ||= []; s.resources ||= []; s.enemies ||= []; s.ladders ||= [];s.chests||=[];s.drops||=[];
+  s.sites=Array.isArray(s.sites)?s.sites.filter(a=>a&&buildings[a.kind]&&Number.isFinite(Number(a.x))):[];
+  s.allies=Array.isArray(s.allies)?s.allies.filter(a=>a&&Number.isFinite(Number(a.x))):[];
+  s.resources=Array.isArray(s.resources)?s.resources.filter(a=>a&&Number.isFinite(Number(a.x))):[];
+  s.enemies=Array.isArray(s.enemies)?s.enemies:[];
+  s.ladders=Array.isArray(s.ladders)?s.ladders:[];
+  s.chests=Array.isArray(s.chests)?s.chests.filter(a=>a&&Number.isFinite(Number(a.x))):[];
+  s.drops=Array.isArray(s.drops)?s.drops:[];
   s.nextSiteId=Number(s.nextSiteId)||1;s.nextAllyId=Number(s.nextAllyId)||1;s.pendingBedOffers||=[];
   for(const site of s.sites){site.id??=s.nextSiteId++;s.nextSiteId=Math.max(s.nextSiteId,site.id+1);
     if(site.kind==='bed'&&site.done)site.completedDay??=s.day;}
@@ -216,7 +222,8 @@
   const damageFloats=[],constructionParticles=[];
   let joystick={x:0,y:0,pointer:null},held={mine:false,gather:false,attack:false};
   function resize() {
-    const d=Math.min(devicePixelRatio||1,2),portrait=innerHeight>innerWidth;
+    // iPad Safari에서 큰 캔버스 할당이 실패하면 첫 프레임이 그려지지 않는다.
+    const d=1,portrait=innerHeight>innerWidth;
     canvas.width=Math.round(innerWidth*d);canvas.height=Math.round(innerHeight*d);
     logicalH=portrait?780:Math.round(960*innerHeight/innerWidth);
     logicalW=portrait?Math.round(780*innerWidth/innerHeight):960;
@@ -1104,7 +1111,7 @@
       withinOutpost(s.player.x,groundY(s.player.x))?'전초기지 보호 범위 · 설계도 작업대에서 모닥불 설계도 제작':'전초기지 밖 · 설치물은 다음 날 파괴돼요';
     $('cancel-mode').style.display=mode?'block':'none';
   }
-  function loop(now){const dt=Math.min((now-last)/1000,.06);last=now;update(dt);draw();updateHud();requestAnimationFrame(loop);}
+  function loop(now){const dt=Math.min((now-last)/1000,.06);last=now;update(dt);draw();updateHud();globalThis.__alienGameReady=true;requestAnimationFrame(loop);}
   reconcileUnsupported();
   requestAnimationFrame(loop);
 })();
