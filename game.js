@@ -17,6 +17,7 @@
     toolbench:{ name:'도구 제작대', icon:'⚒', cost:{stone:4,wood:3,copper:2,iron:1}, w:86,h:68,work:8 },
     bed:{ name:'침대', icon:'▤', cost:{stone:3,metal:2,fiber:2}, w:70,h:43,work:6 },
     farm:{ name:'재배실', icon:'✿', cost:{stone:2,fiber:5}, w:100,h:48,work:7 },
+    lumber:{ name:'벌목장', icon:'♣', cost:{stone:3,wood:5,fiber:3}, w:94,h:53,work:7 },
     wall:{ name:'방벽', icon:'▣', cost:{stone:6,metal:3}, w:32,h:90,work:8 },
     campfire:{ name:'모닥불', icon:'♨', cost:{stone:3,wood:3}, w:45,h:36,work:4 }
   };
@@ -54,7 +55,7 @@
   };
   const plans = {
     workshop:{cost:{wood:1,fiber:1}},toolbench:{cost:{wood:2,copper:1}},bed:{cost:{wood:2,fiber:1}},
-    farm:{cost:{wood:2,stone:1}}, wall:{cost:{stone:2,dirt:2}}, campfire:{cost:{wood:1,stone:1}}
+    farm:{cost:{wood:2,stone:1}}, lumber:{cost:{wood:3,stone:2}}, wall:{cost:{stone:2,dirt:2}}, campfire:{cost:{wood:1,stone:1}}
   };
   const blockTypes={dirt:1,stone:2,wood:5};
   const achievements={
@@ -68,11 +69,11 @@
     hunter:{icon:'⚔',name:'밤의 수호자',description:'적 5마리 처치하기',goal:5,stat:'kills'}
   };
   const initial = () => ({version:12,time:0,day:1,hp:100,hunger:100,temperature:36.5,tempClock:0,lastBiome:'meadow',food:4,
-    inv:{stone:5,dirt:4,wood:2,metal:2,copper:0,iron:0,fiber:3,crystal:0,ladder:0,medkit:0,chest:0,arrows:0},
+    inv:{stone:5,dirt:4,wood:2,metal:2,copper:0,iron:0,fiber:3,crystal:0,ladder:30,medkit:0,chest:0,arrows:0},
     upgrades:{pickaxe:false,sword:false,lamp:false},
     ownedGear:{basicSword:true,basicPickaxe:true},gearCount:{basicSword:1,basicPickaxe:1},equipped:{weapon:'basicSword',tool:'basicPickaxe',helmet:null,armor:null,legs:null,boots:null,light:null},
     player:{x:880,y:SURFACE-28,vy:0,facing:1},sites:[],allies:[],enemies:[],resources:[],
-    terrain:null,ladders:[],placedBlocks:{},enemyDamage:{},chests:[],drops:[],blueprints:{},settings:{joystickSize:108,actionSize:60,controlMode:'joystick',layout:{}},letterSeen:false,kills:0,nextSiteId:1,nextAllyId:1,pendingBedOffers:[],
+    terrain:null,ladders:[],placedBlocks:{},enemyDamage:{},chests:[],drops:[],blueprints:{},settings:{joystickSize:108,actionSize:60,controlMode:'joystick',layout:{}},letterSeen:false,kills:0,nextSiteId:1,nextAllyId:1,pendingBedOffers:[],starterLaddersGranted:true,
     stats:{blocksMined:0,maxDepth:0,woodCollected:0,buildingsBuilt:0,maxDistance:0},awards:{},selectedItem:'stone',hotbar:['stone','dirt','wood','food','medkit','ladder','chest','copper'],hotbarSlot:0});
   let s;
   // 새 월드 규칙을 모두에게 적용한다. 이전 버전의 브라우저 기록은 불러오지 않는다.
@@ -89,6 +90,7 @@
     s = fresh;
   }
   s.inv = {...initial().inv,...s.inv};
+  if(!s.starterLaddersGranted){s.inv.ladder=(s.inv.ladder||0)+30;s.starterLaddersGranted=true;}
   s.hunger=Number.isFinite(s.hunger)?Math.max(0,Math.min(100,s.hunger)):100;
   s.temperature=Number.isFinite(s.temperature)?s.temperature:36.5;s.tempClock=Number(s.tempClock)||0;
   s.kills=Number(s.kills)||0;
@@ -105,7 +107,8 @@
   s.nextSiteId=Number(s.nextSiteId)||1;s.nextAllyId=Number(s.nextAllyId)||1;s.pendingBedOffers||=[];
   for(const site of s.sites){site.id??=s.nextSiteId++;s.nextSiteId=Math.max(s.nextSiteId,site.id+1);
     if(site.kind==='bed'&&site.done)site.completedDay??=s.day;
-    if(site.kind==='farm'){site.cropProgress=Math.max(0,Math.min(100,Number(site.cropProgress)||0));site.cropClock=Number(site.cropClock)||0;}}
+    if(site.kind==='farm'){site.cropProgress=Math.max(0,Math.min(100,Number(site.cropProgress)||0));site.cropClock=Number(site.cropClock)||0;}
+    if(site.kind==='lumber'){site.lumberProgress=Math.max(0,Math.min(200,Number(site.lumberProgress)||0));site.lumberClock=Number(site.lumberClock)||0;}}
   for(const ally of s.allies){ally.id??=s.nextAllyId++;s.nextAllyId=Math.max(s.nextAllyId,ally.id+1);
     ally.role=({guard:'combat',gather:'farmer',haul:'builder'})[ally.role]||ally.role;
     ally.maxHp=Number(ally.maxHp)||Math.max(40,Number(ally.hp)||40);
@@ -227,7 +230,7 @@
   let logicalW=420,logicalH=780,scale=1,viewX=0,viewY=0;
   let speed=1,mode=null,targetTile=null,previewX=null,previewY=null,mineAim=null,minePointer=null,mineTargetKey=null,lastMineAt=0;
   let last=performance.now(),mineCooldown=0,gatherCooldown=0,attackCooldown=0,spawnCooldown=0,caveSpawnCooldown=5,saveClock=0,toastClock=0,hitClock=0,hitTile=null,blockImpact=null;
-  let hurtClock=0,deathClock=0,painTimer=0,attackFlash=0,craftResult='',craftResultClock=0;
+  let hurtClock=0,deathClock=0,painTimer=0,attackFlash=0,craftResult='',craftResultClock=0,dashCooldown=0,dashFlash=0,deathDelay=null;
   const damageFloats=[],constructionParticles=[],flyingArrows=[];
   let bowAim=null,bowPointer=null;
   let joystick={x:0,y:0,pointer:null},held={mine:false,gather:false,attack:false};
@@ -245,6 +248,7 @@
   function flash(message) { $('toast').textContent=message;$('toast').classList.add('show');toastClock=3; }
   function takeDamage(amount,major=false){if(s.hp<=0)return;s.hp=Math.max(0,s.hp-amount);
     if(major||painTimer<=0){hurtClock=.42;painTimer=1.5;}
+    if(s.hp<=0){deathDelay=3;held.mine=held.gather=held.attack=false;flash('쓰러졌어요 · 3초 후 리스폰을 선택하세요');save(true);}
   }
   function checkAwards(){for(const [id,a] of Object.entries(achievements)){
     const progress=a.stat==='day'?s.day:a.stat==='kills'?s.kills:s.stats[a.stat];
@@ -260,8 +264,14 @@
     site.cropProgress=0;site.cropClock=0;damageFloats.push({x:site.x,y:siteGroundY(site)-46,text:`${fiber?'섬유':'식량'} +15`,life:1,color:'#bdeca4'});
     save(true);flash(`${fiber?'섬유':'식량'} 15개 수확!`);return true;
   }
+  function assignedLumberjack(site){return s.allies.find(a=>a.role==='lumberjack'&&a.lumberId===site.id);}
+  function harvestLumber(site){if(!site.done||site.kind!=='lumber'||(site.lumberProgress||0)<200)return false;
+    s.inv.wood+=25;s.inv.fiber+=5;site.lumberProgress=0;site.lumberClock=0;
+    damageFloats.push({x:site.x,y:siteGroundY(site)-42,text:'나무 +25 · 섬유 +5',life:1.2,color:'#c5ebae'});
+    save(true);flash('벌목 완료 · 나무 25개, 섬유 5개 획득!');return true;}
   const nearSite=(site,radius=115)=>Math.abs(s.player.x-site.x)<radius&&Math.abs(s.player.y+24-siteGroundY(site))<85;
   const withinOutpost=(x,y)=>s.sites.some(a=>a.kind==='outpost'&&a.done&&Math.abs(x-a.x)<=18*TILE&&Math.abs(y-siteGroundY(a))<=18*TILE);
+  const sharedOutpost=site=>s.sites.some(a=>a.kind==='outpost'&&a.done&&Math.abs(s.player.x-a.x)<=18*TILE&&Math.abs(s.player.y+24-siteGroundY(a))<=18*TILE&&Math.abs(site.x-a.x)<=18*TILE&&Math.abs(siteGroundY(site)-siteGroundY(a))<=18*TILE);
   const nearCampfire=()=>s.sites.some(a=>a.kind==='campfire'&&a.done&&Math.hypot(s.player.x-a.x,s.player.y+24-siteGroundY(a))<=8*TILE);
   function dropItem(kind,x,y,count=1){for(let i=0;i<count;i++)s.drops.push({kind,x:x+random(-5,5),y:y+random(-4,4),age:0});}
   function emitConstruction(site,count=2){const y=siteGroundY(site)-buildings[site.kind].h*.38;
@@ -277,9 +287,11 @@
   const costText=cost=>Object.entries(cost).map(([k,n])=>`${names[k]} ${n}`).join(' · ');
   const canPay=cost=>Object.entries(cost).every(([k,n])=>(k==='food'?s.food:s.inv[k]||0)>=n);
   function pay(cost){for(const [k,n] of Object.entries(cost)){if(k==='food')s.food-=n;else s.inv[k]-=n;}}
-  const workshopReady=()=>s.sites.some(a=>a.kind==='workshop'&&a.done&&nearSite(a,135));
-  const toolbenchReady=()=>s.sites.some(a=>a.kind==='toolbench'&&a.done&&nearSite(a,135));
-  const draftingReady=()=>s.sites.some(a=>a.kind==='drafting'&&a.done&&nearSite(a,135));
+  const stationReady=kind=>s.sites.some(a=>a.kind===kind&&a.done&&(nearSite(a,135)||sharedOutpost(a)));
+  const workstation=kind=>s.sites.find(a=>a.kind===kind&&a.done&&(nearSite(a,135)||sharedOutpost(a)));
+  const workshopReady=()=>stationReady('workshop');
+  const toolbenchReady=()=>stationReady('toolbench');
+  const draftingReady=()=>stationReady('drafting');
   const toolCrafts=new Set(['pickaxe','copperPickaxe','ironPickaxe','sword','spear','bow','armor','helmet','leggings','boots']);
 
   function tileAt(c,r){
@@ -373,6 +385,12 @@
   }return false;}
   function grounded(){return blocked(s.player.x,s.player.y+2);}
   function jump(){if(grounded()){s.player.vy=-315;flash('점프!');}}
+  function dash(){if(s.hp<=0||dashCooldown>0)return;
+    const dir=Math.abs(joystick.x)>.25?Math.sign(joystick.x):s.settings.controlMode==='keyboard'?(keyboard.right?1:keyboard.left?-1:s.player.facing):s.player.facing;
+    s.player.facing=dir;const start=s.player.x;
+    for(let distance=0;distance<110;distance+=5)if(moveAxis(dir*5,'x'))break;
+    if(Math.abs(s.player.x-start)<3){flash('앞에 벽이 있어 대시할 수 없어요');return;}
+    dashCooldown=5;dashFlash=.35;flash('대시!');}
   function inReach(c,r){const x=c*TILE+TILE/2,y=ORIGIN+r*TILE+TILE/2;
     return Math.hypot(x-s.player.x,y-(s.player.y+12))<76;}
   function selectDigTile(){
@@ -439,12 +457,14 @@
     else if(player)flash('부족한 재료는 가방에서 확인하세요');
   }
   function gather(){
+    if(s.hp<=0)return;
     const p=s.player;
     const resource=s.resources.filter(a=>Math.abs(a.x-p.x)<48&&Math.abs((p.y+24)-groundY(a.x))<65).sort((a,b)=>Math.abs(a.x-p.x)-Math.abs(b.x-p.x))[0];
     if(resource){collect(resource);return;}
     flash('채집할 자원 가까이 이동하세요');
   }
   function mine(){
+    if(s.hp<=0)return;
     const site=s.sites.filter(a=>!a.done&&nearSite(a,85)).sort((a,b)=>Math.abs(a.x-s.player.x)-Math.abs(b.x-s.player.x))[0];
     if(site){if(supplied(site)){site.progress+=.6;emitConstruction(site,7);flash(`${buildings[site.kind].name} 건설 중…`);}else deliver(site,true);return;}
     const tile=selectDigTile();if(tile&&dig(tile.c,tile.r))return;
@@ -472,11 +492,11 @@
     <div class="award-list">${Object.entries(achievements).map(([id,a])=>{const value=a.stat==='day'?s.day:a.stat==='kills'?s.kills:s.stats[a.stat];
       return `<div class="award ${s.awards[id]?'earned':''}"><span class="award-icon">${a.icon}</span><div><b>${a.name}</b><small>${a.description}</small></div><strong>${s.awards[id]?'획득':`${Math.min(value,a.goal)}/${a.goal}`}</strong></div>`;}).join('')}</div>`);}
   function attackInterval(){return s.equipped.weapon==='bow'?.75:s.equipped.weapon==='spear'?.62:s.equipped.weapon==='sword'?.36:.46;}
-  function fireBow(){if(attackCooldown>0)return;if(!s.inv.arrows){flash('화살이 없어요 · 제작소에서 화살을 만드세요');return;}
+  function fireBow(){if(s.hp<=0||attackCooldown>0)return;if(!s.inv.arrows){flash('화살이 없어요 · 제작소에서 화살을 만드세요');return;}
     const direction=bowAim||{x:s.player.facing,y:-.3},magnitude=Math.hypot(direction.x,direction.y)||1,dx=direction.x/magnitude,dy=direction.y/magnitude;
     s.player.facing=dx<0?-1:1;s.inv.arrows--;attackCooldown=attackInterval();attackFlash=.18;
     flyingArrows.push({x:s.player.x+dx*13,y:s.player.y+10+dy*13,vx:dx*410,vy:dy*410,life:2.5});renderHotbar();}
-  function attack(){if(s.equipped.weapon==='bow'){fireBow();return;}if(attackCooldown>0)return;attackCooldown=attackInterval();attackFlash=.16;
+  function attack(){if(s.hp<=0)return;if(s.equipped.weapon==='bow'){fireBow();return;}if(attackCooldown>0)return;attackCooldown=attackInterval();attackFlash=.16;
     const p=s.player,reach=s.equipped.weapon==='spear'?116:77;
     const enemy=s.enemies.filter(e=>Math.abs(e.x-p.x)<reach&&Math.abs(((e.footY??groundY(e.x))-25)-(p.y+14))<74).sort((a,b)=>Math.abs(a.x-p.x)-Math.abs(b.x-p.x))[0];
     if(enemy)damageEnemy(enemy,s.equipped.weapon==='sword'?30:s.equipped.weapon==='spear'?25:18);else flash('공격 범위에 적이 없어요');}
@@ -514,19 +534,19 @@
     flash(`${info.name} 설계도 설치! 채집으로 재료를 넣으세요${kind!=='outpost'&&!withinOutpost(x,floor)?' · 전초기지 밖은 다음 날 파괴':''}`);
   }
   function createPlan(kind){
-    if(!draftingReady()){flash('완성된 설계도 작업대 가까이 이동하세요');return;}
+    if(!draftingReady()){flash('설계도 작업대 근처 또는 같은 기지 안에서 제작하세요');return;}
     if(!canPay(plans[kind].cost)){flash('설계도 재료가 부족해요');return;}
     pay(plans[kind].cost);s.blueprints[kind]=(s.blueprints[kind]||0)+1;
-    celebrateCraft(`${buildings[kind].name} 설계도`,s.sites.find(a=>a.kind==='drafting'&&a.done&&nearSite(a,135)));
+    celebrateCraft(`${buildings[kind].name} 설계도`,workstation('drafting'));
     flash(`${buildings[kind].name} 설계도 +1`);showDrafting();
   }
   function craft(kind){const recipe=crafts[kind];if(!recipe)return;
-    if(toolCrafts.has(kind)?!toolbenchReady():!workshopReady()){flash(`완성된 ${toolCrafts.has(kind)?'도구 제작대':'제작소'} 가까이에서 제작하세요`);return;}
+    if(toolCrafts.has(kind)?!toolbenchReady():!workshopReady()){flash(`${toolCrafts.has(kind)?'도구 제작대':'제작소'} 근처 또는 같은 기지 안에서 제작하세요`);return;}
     if(!canPay(recipe.cost)){flash('제작 재료가 부족해요');return;}
     pay(recipe.cost);
     if(gear[kind]){s.ownedGear[kind]=true;s.gearCount[kind]=(s.gearCount[kind]||0)+1;}
     else s.inv[kind]+=kind==='ladder'?4:kind==='arrows'?8:1;
-    celebrateCraft(recipe.name,s.sites.find(a=>a.kind===(toolCrafts.has(kind)?'toolbench':'workshop')&&a.done&&nearSite(a,135)));
+    celebrateCraft(recipe.name,workstation(toolCrafts.has(kind)?'toolbench':'workshop'));
     flash(`${recipe.name} 제작 완료 · ${gear[kind]?'장비':'가방'}에서 확인하세요`);showCraft();
   }
   function beginChest(){if(!s.inv.chest){flash('상자가 없어요. 제작소에서 만드세요');return;}mode='chest';hideModal();flash('지상의 평평한 땅을 터치해 상자를 놓으세요');}
@@ -558,7 +578,7 @@
   function scheduleBedOffers(){assignLegacyBeds();for(const bed of eligibleBeds())
     if(bed.completedDay<s.day&&!s.pendingBedOffers.includes(bed.id)&&!s.allies.some(a=>a.bedId===bed.id))s.pendingBedOffers.push(bed.id);
     s.pendingBedOffers=s.pendingBedOffers.filter(id=>eligibleBeds().some(a=>a.id===id));}
-  function chooseAlly(bedId,role){const bed=eligibleBeds().find(a=>a.id===bedId),ranges={combat:[80,120],farmer:[40,80],builder:[40,80]};
+  function chooseAlly(bedId,role){const bed=eligibleBeds().find(a=>a.id===bedId),ranges={combat:[80,120],farmer:[40,80],builder:[40,80],lumberjack:[40,80]};
     if(!bed||!ranges[role]||!s.pendingBedOffers.includes(bedId)||s.allies.some(a=>a.bedId===bedId))return;
     const home=outpostsWithBeds().find(a=>Math.abs(bed.x-a.x)<=18*TILE&&Math.abs(siteGroundY(bed)-siteGroundY(a))<=18*TILE);
     if(!home)return;
@@ -572,14 +592,16 @@
   function useMedkit(){if(!s.inv.medkit||s.hp>=100){flash('회복약이 없거나 체력이 가득 찼어요');return;}s.inv.medkit--;s.hp=Math.min(100,s.hp+35);flash('체력 35 회복');refreshBagIfOpen();}
   function eatFood(){if(s.food<=0||s.hunger>=100){flash('식량이 없거나 허기가 가득 찼어요');return;}s.food--;s.hunger=Math.min(100,s.hunger+30);flash('식량을 먹어 허기 30 회복');refreshBagIfOpen();}
   function respawn(isDeath=false){const p=s.player;
+    if(s.hp<=0&&deathDelay!==0)return;
     if(isDeath)s.food=Math.max(0,s.food-2);
     s.hp=100;s.hunger=Math.max(isDeath?60:70,s.hunger);s.temperature=36.5;s.tempClock=0;s.lastBiome='meadow';
     deathClock=isDeath?1.1:.45;hurtClock=0;
-    p.x=SPAWN_X;p.y=groundY(SPAWN_X)-24;p.vy=0;p.facing=1;
-    s.enemies=s.enemies.filter(e=>Math.abs(e.x-SPAWN_X)>220);
+    const base=s.sites.filter(a=>a.kind==='outpost'&&a.done).sort((a,b)=>Math.abs(a.x-p.x)-Math.abs(b.x-p.x))[0];
+    const respawnX=base?.x??SPAWN_X;p.x=respawnX;p.y=(base?siteGroundY(base):groundY(SPAWN_X))-24;p.vy=0;p.facing=1;
+    s.enemies=s.enemies.filter(e=>Math.abs(e.x-respawnX)>220);deathDelay=null;
     mode=null;targetTile=null;previewX=null;previewY=null;held.mine=false;held.attack=false;
     viewX=p.x-logicalW*.5;viewY=p.y+12-logicalH*.5;
-    hideModal();save(true);flash(isDeath?'쓰러져서 시작 지점에서 부활했어요':'시작 지점 X 0 · Y 0으로 리스폰했어요');
+    hideModal();save(true);flash(base?'전초기지에서 리스폰했어요':'시작 지점에서 리스폰했어요');
   }
   function beginLadder(){if(!s.inv.ladder){flash('사다리가 없어요');return;}mode='ladder';hideModal();flash('근처 지하 빈 칸을 터치해 사다리를 설치하세요');}
   function placeLadder(c,r){if(c<0||c>=COLS||r<surfaceRows[c]||r>=ROWS||tileAt(c,r)||!inReach(c,r)){flash('가까운 지하 빈 칸을 터치하세요');return;}
@@ -629,7 +651,7 @@
     <h3>보유한 장비</h3>${Object.entries(gear).filter(([id])=>s.gearCount[id]>0).map(([id,g])=>`<div class="recipe"><div><b>${itemIcons[id]} ${g.name}</b><small>${g.detail} · 총 ${s.gearCount[id]}개 · 남은 ${freeGearCount(id)}개</small></div><button data-equip="${id}" ${s.equipped[g.slot]===id||!freeGearCount(id)?'disabled':''}>${s.equipped[g.slot]===id?'장착 중':freeGearCount(id)?'장착':'다른 동료 사용 중'}</button></div>`).join('')}
     <p class="hint">동료별 장비는 동료 메뉴에서 지정합니다. 장비는 도구 제작대에서 여러 벌 제작할 수 있어요.</p>`);}
   function showDrafting(){const ready=draftingReady(),exists=s.sites.some(a=>a.kind==='drafting'&&a.done);
-    showModal('⌑ 설계도 제작',`<p class="hint">${ready?'작업대에서 설계도를 만들 수 있어요.':exists?'완성된 설계도 작업대 가까이 이동하세요.':'먼저 설계도 창에서 설계도 작업대를 설치하고 재료를 넣어 완성하세요.'}</p>
+    showModal('⌑ 설계도 제작',`<p class="hint">${ready?'작업대에서 설계도를 만들 수 있어요.':exists?'설계도 작업대 근처나 같은 기지 안으로 이동하세요.':'먼저 설계도 창에서 설계도 작업대를 설치하고 재료를 넣어 완성하세요.'}</p>
       ${ready&&craftResultClock>0?`<div class="craft-result">${craftResult}</div>`:''}
       ${ready?Object.entries(plans).map(([kind,p])=>`<div class="recipe"><div><b>${buildings[kind].icon} ${buildings[kind].name} 설계도</b><small>재료: ${costText(p.cost)} · 가방 ${s.blueprints[kind]||0}개</small></div><button data-plan="${kind}" ${!canPay(p.cost)?'disabled':''}>제작</button></div>`).join(''):''}
       ${!exists?'<button data-build="drafting">설계도 작업대 설치</button>':''}`);}
@@ -642,7 +664,7 @@
       ${!available.length?'<p class="section-note">제작한 다른 설계도가 아직 없어요.</p>':''}
       <h3>주변 건물 관리 · 다음 날 철거</h3>${nearby.length?nearby.map(a=>`<div class="recipe"><div><b>${buildings[a.kind].icon} ${buildings[a.kind].name}</b><small>${a.demolishDay?`${a.demolishDay}일차 철거 예약`:'터치해서 철거 예약 또는 취소'}</small></div><button data-manage-site="${a.id}">관리</button></div>`).join(''):'<p class="section-note">건물 가까이 가거나 건물을 직접 터치해 관리하세요.</p>'}`);}
   function showSiteManagement(site){if(!s.sites.includes(site))return;
-    showModal(`${buildings[site.kind].icon} ${buildings[site.kind].name}${site.kind==='farm'?` #${site.id}`:''}`,`<p class="hint">${site.done?'건설 완료':'건설 중'} · 건물은 바닥 블록이 없어지면 무너집니다.</p>
+    showModal(`${buildings[site.kind].icon} ${buildings[site.kind].name}${['farm','lumber'].includes(site.kind)?` #${site.id}`:''}`,`<p class="hint">${site.done?'건설 완료':'건설 중'} · 건물은 바닥 블록이 없어지면 무너집니다.</p>
       ${site.kind==='farm'?`<h3>재배할 작물</h3><p class="section-note">현재: ${site.crop==='fiber'?'섬유':'식량'} · 재배 ${(site.cropProgress||0).toFixed(0)}/100 · 완료 시 15개 수확</p>
       <div class="ally-choices"><button data-farm-crop="${site.id}:food" ${site.crop!=='fiber'?'disabled':''}>▣ 식량 재배</button><button data-farm-crop="${site.id}:fiber" ${site.crop==='fiber'?'disabled':''}>✿ 섬유 재배</button></div>
       <div class="farm-progress"><div style="width:${Math.min(100,site.cropProgress||0)}%"></div></div>
@@ -650,6 +672,12 @@
       <h3>농부 배치 · 재배실당 1명</h3><p class="section-note">현재 ${assignedFarmer(site)?`동료 ${s.allies.indexOf(assignedFarmer(site))+1}번 농부`:'배치된 농부 없음'} · 배치된 농부가 재배를 대신합니다.</p>
       ${s.allies.filter(a=>a.role==='farmer').map(a=>`<button class="farm-assign" data-assign-farmer="${site.id}:${a.id}">동료 ${s.allies.indexOf(a)+1}번 농부 ${a.farmId===site.id?'· 배치 중':a.farmId?`· 다른 재배실 #${a.farmId}`:'· 대기 중'}</button>`).join('')||'<p class="section-note">농부 동료가 아직 없어요.</p>'}
       ${assignedFarmer(site)?`<button class="farm-assign" data-assign-farmer="${site.id}:0">농부 배치 해제</button>`:''}`:''}
+      ${site.kind==='lumber'?`<h3>벌목 작업</h3><p class="section-note">진행도 ${Math.floor(site.lumberProgress||0)}/200 · 완료 시 나무 25개와 섬유 5개</p>
+      <div class="farm-progress"><div style="width:${Math.min(100,(site.lumberProgress||0)/2)}%"></div></div>
+      ${site.done?`<div class="ally-choices"><button data-lumber-work="${site.id}" ${(site.lumberProgress||0)>=200?'disabled':''}>♣ 벌목 +1</button><button data-lumber-harvest="${site.id}" ${(site.lumberProgress||0)<200?'disabled':''}>▣ 수확</button></div>`:'<p class="section-note">건설이 완료되면 벌목할 수 있어요.</p>'}
+      <h3>벌목가 배치 · 벌목장당 1명</h3><p class="section-note">현재 ${assignedLumberjack(site)?`동료 ${s.allies.indexOf(assignedLumberjack(site))+1}번 벌목가`:'배치된 벌목가 없음'} · 배치 시 1초에 진행도 1</p>
+      ${s.allies.filter(a=>a.role==='lumberjack').map(a=>`<button class="farm-assign" data-assign-lumber="${site.id}:${a.id}">동료 ${s.allies.indexOf(a)+1}번 벌목가 ${a.lumberId===site.id?'· 배치 중':a.lumberId?`· 다른 벌목장 #${a.lumberId}`:'· 대기 중'}</button>`).join('')||'<p class="section-note">벌목가 동료가 아직 없어요.</p>'}
+      ${assignedLumberjack(site)?`<button class="farm-assign" data-assign-lumber="${site.id}:0">벌목가 배치 해제</button>`:''}`:''}
       ${site.demolishDay?`<p class="section-note">${site.demolishDay}일차 아침에 철거 예정</p><button data-undo-demolish="${site.id}">철거 취소</button>`:
       `<button data-demolish="${site.id}">다음 날 철거하기</button>`}`);}
   function showCraft(){const ready=workshopReady(),toolReady=toolbenchReady();
@@ -660,7 +688,7 @@
       ${toolReady?`<h3>⚒ 도구 제작대</h3>${rows(true)}`:''}
       ${ready?`<h3>⚙ 제작소</h3>${rows(false)}`:''}`);}
   function showSettings(){showModal('⚙ 설정',`<div class="settings-row"><div><b>조작 방식</b><br><span class="section-note">키보드 또는 화면 조이스틱 선택</span></div><select data-control-mode aria-label="조작 방식"><option value="joystick" ${s.settings.controlMode==='joystick'?'selected':''}>조이스틱</option><option value="keyboard" ${s.settings.controlMode==='keyboard'?'selected':''}>키보드</option></select></div>
-    <p class="hint">키보드: A/D 좌우 이동 · W 사다리 · S+E 아래 블록 캐기 · 스페이스 점프 · E 장착 도구 사용/건설 · G 자원 채집 · F 공격 · I 가방 · 숫자 1~8 핫바. 키보드 선택 시 화면 조이스틱과 전투 버튼이 숨겨집니다.</p><div class="settings-row"><div><b>조이스틱 크기</b><br><span class="section-note">작게 ← → 크게 · 최대 200</span></div><input type="range" min="80" max="200" step="4" data-setting="joystick" value="${s.settings.joystickSize}" aria-label="조이스틱 크기"><span id="size-value">${s.settings.joystickSize}</span></div>
+    <p class="hint">키보드: A/D 좌우 이동 · W 사다리 · S+E 아래 블록 캐기 · 스페이스 점프 · Shift 좌우 대시(5초 쿨타임) · E 장착 도구 사용/건설 · G 자원 채집 · F 공격 · I 가방 · 숫자 1~8 핫바. 키보드 선택 시 화면 조이스틱과 전투 버튼이 숨겨집니다.</p><div class="settings-row"><div><b>조이스틱 크기</b><br><span class="section-note">작게 ← → 크게 · 최대 200</span></div><input type="range" min="80" max="200" step="4" data-setting="joystick" value="${s.settings.joystickSize}" aria-label="조이스틱 크기"><span id="size-value">${s.settings.joystickSize}</span></div>
     <div class="settings-row"><div><b>오른쪽 버튼 크기</b><br><span class="section-note">도구·채집·설치·공격·점프</span></div><input type="range" min="44" max="92" step="4" data-setting="actions" value="${s.settings.actionSize}" aria-label="오른쪽 버튼 크기"><span id="action-size-value">${s.settings.actionSize}</span></div>
     <div class="settings-row"><div><b>자유 배치</b><br><span class="section-note">조이스틱과 오른쪽 버튼을 각각 원하는 곳으로 옮겨요.</span></div><button data-layout-edit="1">배치하기</button></div>
     <p class="hint">크기와 위치 설정은 자동 저장됩니다.</p><div class="settings-row"><span>현재 진행 상황</span><button data-save="1">저장</button></div>
@@ -677,12 +705,14 @@
     <p>일부 외계인은 플레이어가 만든 정착지에 들어와 함께 생활하기 시작한다.</p>
     <p>누군가는 농사를 짓고,<br>누군가는 자원을 채집하고,<br>누군가는 건설을 돕거나 정착지를 지킨다.</p>
     <p>그렇게 혼자 시작했던 작은 임시 거처는 여러 외계인들이 함께 살아가는 하나의 정착지로 성장한다.</p></div><button data-letter-close="1">편지 닫기</button>`);}
-  const roleName={combat:'전투',farmer:'농부',builder:'건설'};
+  const roleName={combat:'전투',farmer:'농부',builder:'건설',lumberjack:'벌목가'};
+  const dailyFoodCost=ally=>ally.workedToday?25:10;
+  const dailyFoodTotal=()=>s.allies.reduce((sum,a)=>sum+dailyFoodCost(a),0);
   function showAllies(){const offers=s.pendingBedOffers.filter(id=>eligibleBeds().some(a=>a.id===id));
-    showModal('✦ 동료',`<p class="hint">침대가 완성된 다음 날 동료의 역할을 고릅니다. 각 동료는 매일 식량 10개를 먹고, 식량이 부족하면 떠납니다.</p>
-    <p class="section-note">동료 ${s.allies.length}명 · 전초기지 안의 침대 ${eligibleBeds().length}개 · 매일 필요한 식량 ${s.allies.length*10}개</p>
-    ${offers.map((id,i)=>`<div class="ally-offer"><b>✦ 새 동료 ${i+1} · 역할 선택</b><div class="ally-choices"><button data-choose-ally="${id}:combat">⚔ 전투<small>체력 80~120 · 적 공격</small></button><button data-choose-ally="${id}:farmer">✿ 농부<small>체력 40~80 · 농사</small></button><button data-choose-ally="${id}:builder">⌑ 건설<small>체력 40~80 · 자재 운반</small></button></div></div>`).join('')}
-    ${s.allies.map((a,i)=>`<div class="recipe"><div><b>${i+1}번 동료 · ${roleName[a.role]||'건설'} · ♥${Math.ceil(a.hp)}/${a.maxHp}</b><small>장비 ${Object.values(a.equipment||{}).filter(Boolean).length}개 · ${a.role==='farmer'?(s.sites.some(site=>site.kind==='farm'&&site.id===a.farmId)?`재배실 #${a.farmId} 배치`:'재배실 미배치'):'전초기지 30블록 이내'}</small></div><button data-ally-gear="${i}">장비</button></div>`).join('')}`);}
+    showModal('✦ 동료',`<p class="hint">침대가 완성된 다음 날 동료 역할을 고릅니다. 일한 동료는 하루 식량 25개, 쉬는 동료는 10개를 먹습니다. 부족하면 떠납니다.</p>
+    <p class="section-note">동료 ${s.allies.length}명 · 침대 ${eligibleBeds().length}개 · 이번 날 필요한 식량 ${dailyFoodTotal()}개</p>
+    ${offers.map((id,i)=>`<div class="ally-offer"><b>✦ 새 동료 ${i+1} · 역할 선택</b><div class="ally-choices"><button data-choose-ally="${id}:combat">⚔ 전투<small>체력 80~120 · 적 공격</small></button><button data-choose-ally="${id}:farmer">✿ 농부<small>체력 40~80 · 농사</small></button><button data-choose-ally="${id}:builder">⌑ 건설<small>체력 40~80 · 건설</small></button><button data-choose-ally="${id}:lumberjack">♣ 벌목가<small>체력 40~80 · 벌목</small></button></div></div>`).join('')}
+    ${s.allies.map((a,i)=>`<div class="recipe"><div><b>${i+1}번 동료 · ${roleName[a.role]||'건설'} · ♥${Math.ceil(a.hp)}/${a.maxHp}</b><small>장비 ${Object.values(a.equipment||{}).filter(Boolean).length}개 · ${a.role==='farmer'?(s.sites.some(site=>site.kind==='farm'&&site.id===a.farmId)?`재배실 #${a.farmId} 배치`:'재배실 미배치'):a.role==='lumberjack'?(s.sites.some(site=>site.kind==='lumber'&&site.id===a.lumberId)?`벌목장 #${a.lumberId} 배치`:'벌목장 미배치'):'전초기지 30블록 이내'} · 하루 식량 ${dailyFoodCost(a)}개</small></div><button data-ally-gear="${i}">장비</button></div>`).join('')}`);}
   function showAllyEquipment(index){const ally=s.allies[index];if(!ally)return;ally.equipment||={};
     showModal(`⚔ ${index+1}번 동료 장비`,`<p class="hint">${roleName[ally.role]} · 체력 ${Math.ceil(ally.hp)}/${ally.maxHp} · 장비 한 벌은 한 명만 사용할 수 있어요.</p>
       <div class="equipment-layout"><div class="body-slots">${['helmet','armor','legs','boots'].map(slot=>`<div class="equip-slot"><span class="equip-icon">${slotIcons[slot]}</span><span>${slotNames[slot]}<b>${gear[ally.equipment[slot]]?.name||'빈 칸'}</b></span></div>`).join('')}</div>
@@ -701,6 +731,10 @@
     if(b.dataset.farmTend){const site=s.sites.find(a=>a.id===Number(b.dataset.farmTend)&&a.kind==='farm'&&a.done);
       if(site&&(site.cropProgress||0)<100){site.cropProgress=Math.min(100,(site.cropProgress||0)+1);if(site.cropProgress%10===0)save(true);showSiteManagement(site);}}
     if(b.dataset.farmHarvest){const site=s.sites.find(a=>a.id===Number(b.dataset.farmHarvest)&&a.kind==='farm');if(site&&harvestFarm(site))showSiteManagement(site);}
+    if(b.dataset.lumberWork){const site=s.sites.find(a=>a.id===Number(b.dataset.lumberWork)&&a.kind==='lumber'&&a.done);if(site&&(site.lumberProgress||0)<200){site.lumberProgress=Math.min(200,(site.lumberProgress||0)+1);if(site.lumberProgress%10===0)save(true);showSiteManagement(site);}}
+    if(b.dataset.lumberHarvest){const site=s.sites.find(a=>a.id===Number(b.dataset.lumberHarvest)&&a.kind==='lumber');if(site&&harvestLumber(site))showSiteManagement(site);}
+    if(b.dataset.assignLumber){const [id,allyId]=b.dataset.assignLumber.split(':').map(Number),site=s.sites.find(a=>a.id===id&&a.kind==='lumber');if(site){const old=assignedLumberjack(site);if(old)delete old.lumberId;
+      if(allyId){const ally=s.allies.find(a=>a.id===allyId&&a.role==='lumberjack');if(ally)ally.lumberId=site.id;}save(true);showSiteManagement(site);}}
     if(b.dataset.assignFarmer){const [siteId,allyId]=b.dataset.assignFarmer.split(':').map(Number),site=s.sites.find(a=>a.id===siteId&&a.kind==='farm');
       if(site){if(allyId===0){const old=assignedFarmer(site);if(old)delete old.farmId;}
         else{const ally=s.allies.find(a=>a.id===allyId&&a.role==='farmer');if(ally){const old=assignedFarmer(site);if(old&&old!==ally)delete old.farmId;ally.farmId=site.id;}}
@@ -732,6 +766,7 @@
     if(b.dataset.take)transferChest(b.dataset.take,'take');
     if(b.dataset.save)save();
     if(b.dataset.respawn)respawn();
+    if(b.dataset.deathRespawn&&s.hp<=0&&deathDelay===0)respawn(true);
     if(b.dataset.layoutEdit)startLayoutEditing();
     if(b.dataset.resetPrompt)showModal('게임 리셋',`<p class="hint">정말 리셋하시겠습니까?</p><p class="section-note">[진행도가 모두 초기화 됩니다]</p><div class="ally-choices"><button data-reset-yes="1">예</button><button data-reset-no="1">아니요</button></div>`);
     if(b.dataset.resetNo)showSettings();
@@ -764,7 +799,7 @@
   document.documentElement.style.setProperty('--action-size',`${s.settings.actionSize}px`);
   document.body.classList.toggle('keyboard-controls',s.settings.controlMode==='keyboard');
   const joy=$('joystick'),stick=$('stick');
-  const layoutIds=['joystick','mine','gather','place-below','attack','jump'];
+  const layoutIds=['joystick','mine','gather','place-below','attack','dash','jump'];
   let layoutEditing=false,layoutDrag=null;
   function applyControlLayout(){for(const id of layoutIds){const el=$(id),point=s.settings.layout[id];
       if(!point||!Number.isFinite(point.x)||!Number.isFinite(point.y)){
@@ -835,6 +870,7 @@
     held.attack=false;if(e.pointerId!==bowPointer)return;
     if(type==='pointerup'&&s.equipped.weapon==='bow')fireBow();bowPointer=null;bowAim=null;attackButton.classList.remove('aiming');});
   $('place-below').addEventListener('pointerdown',e=>{e.preventDefault();placeBelow();});
+  $('dash').addEventListener('pointerdown',e=>{e.preventDefault();dash();});
   $('jump').addEventListener('pointerdown',e=>{e.preventDefault();jump();});
   const keyboard={left:false,right:false,down:false,up:false,mine:false,gather:false,attack:false};
   addEventListener('keydown',e=>{if(s.settings.controlMode!=='keyboard'||$('overlay').classList.contains('open'))return;
@@ -844,6 +880,7 @@
     if(['s','ArrowDown'].includes(e.key))keyboard.down=true;
     if(['w','ArrowUp'].includes(e.key))keyboard.up=true;
     if(e.code==='Space'&&!e.repeat){e.preventDefault();jump();}
+    if(e.key==='Shift'&&!e.repeat){e.preventDefault();dash();}
     if(e.key.toLowerCase()==='e')keyboard.mine=true;
     if(e.key.toLowerCase()==='g')keyboard.gather=true;
     if(e.key.toLowerCase()==='f'){if(s.equipped.weapon==='bow'){if(!e.repeat)fireBow();}else keyboard.attack=true;}
@@ -889,6 +926,11 @@
   }
 
   function update(dt){const p=s.player,gameDt=Math.min(dt,.05)*speed;
+    if(s.hp<=0){deathDelay=deathDelay===null?3:Math.max(0,deathDelay-dt);
+      if(deathDelay===0&&($('modal-title').textContent!=='리스폰'||!$('overlay').classList.contains('open')))
+        showModal('리스폰',`<p class="hint">쓰러졌어요. 가까운 전초기지에서 다시 시작할 수 있어요.</p><button data-death-respawn="1">기지에서 리스폰</button>`);
+      return;}
+    dashCooldown=Math.max(0,dashCooldown-dt);dashFlash=Math.max(0,dashFlash-dt);
     freePlayerIfTrapped();
     let move=clamp(s.settings.controlMode==='keyboard'?(keyboard.right?1:0)-(keyboard.left?1:0):joystick.x,-1,1);
     if(Math.abs(move)<.12)move=0;if(move)p.facing=Math.sign(move);
@@ -923,13 +965,14 @@
     }
     if(s.hunger===0)takeDamage(gameDt*.12);
     if(s.temperature>=39||s.temperature<=34)takeDamage(gameDt*.12);
-    if(s.hp<=0){respawn(true);return;}
+    if(nearCampfire()&&s.hp>0)s.hp=Math.min(100,s.hp+dt*.5);
+    if(s.hp<=0)return;
     if(Math.floor(s.time/CYCLE)>prev){s.day++;const demolished=processDemolitions(),cleared=clearOutsideOutposts();
       // 재배실은 완료된 밭을 수확할 때 생산한다. 날짜가 바뀌어도 진행도는 유지한다.
       assignLegacyBeds();const activeBeds=new Set(eligibleBeds().map(a=>a.id));let bedless=0;
       for(const ally of [...s.allies])if(ally.bedId&&!activeBeds.has(ally.bedId)){s.allies.splice(s.allies.indexOf(ally),1);bedless++;}
       scheduleBedOffers();let departed=0;
-      for(const ally of [...s.allies]){if(s.food>=10)s.food-=10;else{s.allies.splice(s.allies.indexOf(ally),1);departed++;}}
+      for(const ally of [...s.allies]){const cost=dailyFoodCost(ally);if(s.food>=cost){s.food-=cost;ally.workedToday=false;}else{s.allies.splice(s.allies.indexOf(ally),1);departed++;}}
       if(eligibleBeds().length)for(const ally of s.allies)ally.hp=Math.min(ally.maxHp,ally.hp+5);
       flash(`${s.day}일차 낮 · 철거 ${demolished} · 범위 밖 파괴 ${cleared} · 떠난 동료 ${departed+bedless}`);
       if(s.pendingBedOffers.length)showAllies();save(true);}
@@ -955,14 +998,15 @@
       }
     }
     for(const site of s.sites){if(site.done||!supplied(site))continue;
-      const workers=s.allies.filter(a=>a.role==='builder'&&Math.abs(a.x-site.x)<80).length;
+      const builders=s.allies.filter(a=>a.role==='builder'&&Math.abs(a.x-site.x)<80);
+      builders.forEach(a=>a.workedToday=true);const workers=builders.length;
       const work=gameDt*((nearSite(site,115)?1:0)+workers*.7);site.progress+=work;
       site.sparkClock=(site.sparkClock||0)+gameDt;if(work>0&&site.sparkClock>.11){site.sparkClock=0;emitConstruction(site,4);}
       if(site.progress>=buildings[site.kind].work){site.done=true;if(site.kind==='bed')site.completedDay=s.day;site.completeFlash=1.25;emitConstruction(site,42);s.stats.buildingsBuilt++;held.mine=false;checkAwards();flash(`${buildings[site.kind].name} 완성!`);}}
     for(const site of s.sites)site.completeFlash=Math.max(0,(site.completeFlash||0)-dt);
     craftResultClock=Math.max(0,craftResultClock-dt);
     for(let i=constructionParticles.length-1;i>=0;i--){const v=constructionParticles[i];v.x+=v.vx*dt;v.y+=v.vy*dt;v.vy+=145*dt;v.life-=dt;if(v.life<=0)constructionParticles.splice(i,1);}
-    for(const a of s.allies){a.work=(a.work||0)-gameDt;a.farming=false;
+    for(const a of s.allies){a.work=(a.work||0)-gameDt;a.farming=false;a.sleeping=false;a.lumbering=false;
       const homes=outpostsWithBeds(),home=homes.find(t=>t.x===a.homeX)||homes.sort((u,v)=>Math.abs(u.x-a.x)-Math.abs(v.x-a.x))[0];
       if(home)a.homeX=home.x;
       const base=home?.x??SPAWN_X,minimum=base-30*TILE,maximum=base+30*TILE;
@@ -970,13 +1014,23 @@
       let destination=base;
       if(home&&a.x>=minimum&&a.x<=maximum){
         if(a.role==='builder'){const site=s.sites.find(t=>!t.done&&t.x>=minimum&&t.x<=maximum);
-          if(site){destination=site.x-24;if(Math.abs(a.x-site.x)<70&&a.work<=0&&!supplied(site)){deliver(site,false);a.work=2;}}}
+          if(site){destination=site.x-24;if(Math.abs(a.x-site.x)<70&&a.work<=0&&!supplied(site)){deliver(site,false);a.workedToday=true;a.work=2;}}}
         else if(a.role==='farmer'&&phase()==='낮'){const farm=s.sites.find(t=>t.id===a.farmId&&t.kind==='farm'&&t.done&&t.x>=minimum&&t.x<=maximum);
           if(farm){destination=farm.x+Math.sin(s.time*.17+s.allies.indexOf(a)*2)*21;
             if(Math.abs(a.x-farm.x)<43&&Math.abs(a.footY-siteGroundY(farm))<34){a.farming=true;
-              if((farm.cropProgress||0)<100)farm.cropClock=(farm.cropClock||0)+dt;
+              if((farm.cropProgress||0)<100){farm.cropClock=(farm.cropClock||0)+dt;a.workedToday=true;}
               if(farm.cropClock>=1&&(farm.cropProgress||0)<100){farm.cropClock-=1;farm.cropProgress=Math.min(100,(farm.cropProgress||0)+1);
                 if(farm.cropProgress===100)damageFloats.push({x:farm.x,y:siteGroundY(farm)-48,text:'수확 가능!',life:1,color:'#d9e99e'});}}}}
+        else if(a.role==='lumberjack'&&phase()==='낮'){const yard=s.sites.find(t=>t.id===a.lumberId&&t.kind==='lumber'&&t.done&&t.x>=minimum&&t.x<=maximum);
+          if(yard){destination=yard.x+19;
+            if(Math.abs(a.x-yard.x)<48&&Math.abs(a.footY-siteGroundY(yard))<34){a.lumbering=true;
+              if((yard.lumberProgress||0)<200){yard.lumberClock=(yard.lumberClock||0)+dt;a.workedToday=true;}
+              if(yard.lumberClock>=1&&(yard.lumberProgress||0)<200){yard.lumberClock-=1;yard.lumberProgress=Math.min(200,(yard.lumberProgress||0)+1);
+                if(yard.lumberProgress===200)damageFloats.push({x:yard.x,y:siteGroundY(yard)-49,text:'벌목 수확 가능!',life:1,color:'#d6efb3'});}}}}
+        else if(['farmer','lumberjack'].includes(a.role)&&phase()==='밤'){
+          const bed=s.sites.find(t=>t.id===a.bedId&&t.kind==='bed'&&t.done);
+          if(bed)destination=bed.x;
+        }
         else if(a.role==='combat'){
           const threats=s.enemies.filter(e=>e.x>=minimum&&e.x<=maximum&&Math.abs((e.footY??groundY(e.x))-a.footY)<TILE*3);
           const nearest=threats.sort((u,v)=>Math.abs(u.x-a.x)-Math.abs(v.x-a.x))[0];
@@ -985,9 +1039,12 @@
       }
       destination=clamp(destination,minimum+10,maximum-10);
       moveWalker(a,destination,a.role==='combat'?105:78,gameDt);
+      if(phase()==='밤'&&['farmer','lumberjack'].includes(a.role)){
+        const bed=s.sites.find(t=>t.id===a.bedId&&t.kind==='bed'&&t.done);
+        a.sleeping=!!bed&&Math.abs(a.x-bed.x)<23&&Math.abs(a.footY-siteGroundY(bed))<30;}
       if(a.role==='combat'){const reach=a.equipment?.weapon==='spear'?105:70;
         const enemy=s.enemies.find(e=>Math.abs(e.x-a.x)<reach&&Math.abs((e.footY??groundY(e.x))-a.footY)<60);
-        if(enemy&&a.work<=0){damageEnemy(enemy,a.equipment?.weapon==='sword'?25:a.equipment?.weapon==='spear'?21:a.equipment?.weapon==='basicSword'?17:12);a.work=a.equipment?.weapon==='spear'?1.2:.85;}}
+        if(enemy&&a.work<=0){damageEnemy(enemy,a.equipment?.weapon==='sword'?25:a.equipment?.weapon==='spear'?21:a.equipment?.weapon==='basicSword'?17:12);a.workedToday=true;a.work=a.equipment?.weapon==='spear'?1.2:.85;}}
     }
     for(const enemy of [...s.enemies]){enemy.strike-=gameDt;enemy.breakClock=(enemy.breakClock||0)-gameDt;enemy.hitFlash=Math.max(0,(enemy.hitFlash||0)-dt);
       const wall=s.sites.find(a=>a.done&&a.kind==='wall'&&Math.abs(a.x-enemy.x)<33);
@@ -1007,7 +1064,7 @@
         const protection=(s.equipped.armor==='armor'?3:0)+(s.equipped.helmet==='helmet'?1:0)+(s.equipped.legs==='leggings'?1:0)+(s.equipped.boots==='boots'?1:0);
         takeDamage(Math.max(2,10-protection),true);enemy.strike=1.2;
         damageFloats.push({x:p.x,y:p.y-12,text:'피격!',life:.7,color:'#ff8e9b'});
-        if(s.hp<=0){respawn(true);break;}}
+        if(s.hp<=0)break;}
       else if(enemy.strike<=0){const ally=s.allies.find(a=>Math.abs(a.x-enemy.x)<25&&Math.abs(a.footY-(enemy.footY??groundY(enemy.x)))<35);
         if(ally){const armor=(ally.equipment?.armor==='armor'?2:0)+(ally.equipment?.helmet==='helmet'?1:0)+(ally.equipment?.legs==='leggings'?1:0)+(ally.equipment?.boots==='boots'?1:0);
           const dealt=Math.max(1,6-armor);ally.hp=Math.max(0,ally.hp-dealt);enemy.strike=1.2;
@@ -1166,6 +1223,9 @@
       rect(x+12,y+30,15,20,'#45717b');rect(x+52,y+29,16,21,'#527789');rect(x+30,y+9,23,7,'#aac6c4');text('⚒',x+36,y+9,16,'#e7deaa');}
     else if(a.kind==='bed'){rect(x,y+17,info.w,info.h-17,'#657889');rect(x+5,y+11,info.w-10,17,'#caa883');rect(x+7,y+13,16,10,'#dee2cc');}
     else if(a.kind==='farm'){const fiber=a.crop==='fiber';rect(x,y+23,info.w,25,'#70605c');for(let j=0;j<6;j++){rect(x+j*16+8,y+9,4,17,fiber?'#95b8bd':'#70b992');rect(x+j*16+4,y+5,11,7,fiber?'#bfd7cf':'#addd92');}text(`${fiber?'섬유':'식량'} ${Math.round(a.cropProgress||0)}/100`,x+6,y+3,13,'#e2f3d5');}
+    else if(a.kind==='lumber'){rect(x+4,y+26,info.w-8,23,'#705b4a');rect(x+12,y+18,info.w-24,10,'#9d7956');
+      for(let j=0;j<4;j++){rect(x+12+j*19,y+5,15,17,'#a7754c');rect(x+12+j*19,y+5,15,3,'#d5ab71');}
+      text(`벌목 ${Math.floor(a.lumberProgress||0)}/200`,x+4,y+1,12,'#f1e1b6');}
     else{rect(x,y,info.w,info.h,'#718792');for(let j=0;j<3;j++)rect(x+6,y+9+j*27,20,15,'#9eafb1');}
     if(a.completeFlash>0){const pulse=a.completeFlash;
       ctx.strokeStyle=`rgba(255,224,149,${Math.min(1,pulse)})`;ctx.lineWidth=4;ctx.strokeRect(x-11*pulse,y-11*pulse,info.w+22*pulse,info.h+22*pulse);
@@ -1185,7 +1245,10 @@
       text(`화살 ${s.inv.arrows||0}개`,s.player.x-30,s.player.y-19,12,'#ffe29d');
     }}
   function drawActors(){for(const a of s.allies){const y=a.drawY??groundY(a.x),working=a.farming?Math.sin(performance.now()/170):0;
-      rect(a.x-8,y-29+(a.farming?Math.max(0,working)*2:0),16,29,'#cfaa86');rect(a.x-8,y-36,16,10,'#8dc9c0');rect(a.x-5,y-24,10,5,a.equipment?.armor?'#637c91':'#355266');text(a.role==='combat'?'⚔':a.role==='farmer'?'✿':'▣',a.x-7,y-42,12);
+      if(a.sleeping){rect(a.x-15,y-13,30,10,'#93a9a6');rect(a.x-19,y-16,10,12,'#cfaa86');text('Z z',a.x-4,y-29+Math.sin(performance.now()/430)*2,13,'#dcebe2');
+        rect(a.x-19,y-51,38,5,'#1b303b');rect(a.x-19,y-51,38*a.hp/a.maxHp,5,'#e57e84');text(`♥${Math.ceil(a.hp)}/${a.maxHp}`,a.x-21,y-55,10,'#ffe1d9');continue;}
+      rect(a.x-8,y-29+(a.farming?Math.max(0,working)*2:0),16,29,'#cfaa86');rect(a.x-8,y-36,16,10,'#8dc9c0');rect(a.x-5,y-24,10,5,a.equipment?.armor?'#637c91':'#355266');text(a.role==='combat'?'⚔':a.role==='farmer'?'✿':a.role==='lumberjack'?'♣':'▣',a.x-7,y-42,12);
+      if(a.lumbering){const sway=Math.sin(performance.now()/155);rect(a.x+8,y-27+sway*4,3,22,'#b18d6e');rect(a.x+6,y-26+sway*4,11,5,'#cad5c3');}
       if(a.farming){rect(a.x+9,y-24+working*5,2,20,'#a77d57');rect(a.x+5,y-8+working*5,12,3,'#cbd5bc');
         if(working>.8){rect(a.x+14,y-2,3,3,'#b39470');rect(a.x+20,y-5,2,2,'#d0bd88');}}
       if(a.equipment?.helmet)rect(a.x-9,y-37,18,6,'#c4ac87');if(a.equipment?.weapon)rect(a.x+8,y-21,3,19,'#d4b683');
@@ -1252,9 +1315,9 @@
     if(Number.isFinite(topBottom)&&Math.abs(topBottom-lastHudTop)>1){lastHudTop=topBottom;document.documentElement.style.setProperty('--hud-top-end',`${Math.ceil(topBottom)}px`);}
     const rem=phase()==='낮'?DAY-s.time%CYCLE:CYCLE-s.time%CYCLE;
     $('clock').textContent=`${phase()==='낮'?'☀ 낮':'☾ 밤'} ${s.day}일차 · ${Math.floor(rem/60)}:${String(Math.floor(rem%60)).padStart(2,'0')} · ♥${Math.ceil(s.hp)}`;
-    $('materials').textContent=`돌 ${s.inv.stone}  구리 ${s.inv.copper}  철 ${s.inv.iron}  나무 ${s.inv.wood}  식량 ${s.food}  하루 필요 ${s.allies.length*10}  동료 ${s.allies.length}`;
-    $('daily-food').textContent=`🍞 매일 필요한 식량 ${s.allies.length*10}개 · 보유 ${s.food}개`;
-    $('daily-food').classList.toggle('shortage',s.food<s.allies.length*10);
+    $('materials').textContent=`돌 ${s.inv.stone}  구리 ${s.inv.copper}  철 ${s.inv.iron}  나무 ${s.inv.wood}  식량 ${s.food}  하루 필요 ${dailyFoodTotal()}  동료 ${s.allies.length}`;
+    $('daily-food').textContent=`🍞 매일 필요한 식량 ${dailyFoodTotal()}개 · 보유 ${s.food}개`;
+    $('daily-food').classList.toggle('shortage',s.food<dailyFoodTotal());
     $('health-value').textContent=`${Math.ceil(s.hp)}/100`;$('health-fill').style.width=`${clamp(s.hp,0,100)}%`;
     $('hunger-value').textContent=`${Math.ceil(s.hunger)}/100`;$('hunger-fill').style.width=`${clamp(s.hunger,0,100)}%`;
     $('hunger-fill').classList.toggle('low',s.hunger<25);
@@ -1267,6 +1330,8 @@
     $('attack-label').textContent=s.equipped.weapon==='bow'?'조준 · 놓기':'공격';
     $('attack-icon').textContent=s.equipped.weapon==='bow'?'🏹':'⚔';
     $('attack-speed').textContent=`${(1/attackInterval()).toFixed(1)}/초`;
+    $('dash-label').textContent=dashCooldown>0?`${dashCooldown.toFixed(1)}초`:'대시';
+    $('dash').style.opacity=dashCooldown>0?'.6':'1';
     renderHotbar();
     const site=s.sites.find(a=>!a.done&&nearSite(a,90));
     $('status').textContent=site?`${buildings[site.kind].name}: ${Object.entries(buildings[site.kind].cost).map(([k,n])=>`${names[k]} ${site.put[k]||0}/${n}`).join(' · ')}${supplied(site)?' · 건설 중':' · 채집으로 넣기'}`:
