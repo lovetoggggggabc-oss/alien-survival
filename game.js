@@ -69,6 +69,7 @@
     s = fresh;
   }
   s.inv = {...initial().inv,...s.inv};
+  s.kills=Number(s.kills)||0;
   s.upgrades = {...initial().upgrades,...s.upgrades};
   s.player = {...initial().player,...s.player};
   s.sites ||= []; s.allies ||= []; s.resources ||= []; s.enemies ||= []; s.ladders ||= [];
