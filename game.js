@@ -806,7 +806,7 @@
   function text(str,x,y,size=12,color='#edf5ea'){ctx.font=`bold ${size}px monospace`;ctx.fillStyle=color;ctx.fillText(str,Math.round(x),Math.round(y));}
   function drawBackground(){const night=phase()==='밤';let sky=ctx.createLinearGradient(0,-120,0,490);
     sky.addColorStop(0,night?'#111c3b':'#315a77');sky.addColorStop(.62,night?'#38405e':'#7093a0');sky.addColorStop(1,night?'#54526a':'#b7adb0');
-    ctx.fillStyle=sky;ctx.fillRect(-logicalW,-logicalH-100,WORLD_W+logicalW*2,logicalH+620);
+    ctx.fillStyle=sky;ctx.fillRect(-logicalW,-logicalH-100,WORLD_W+logicalW*2,WORLD_H+logicalH+100);
     const left=Math.max(0,Math.floor(viewX/TILE)-1),right=Math.min(COLS-1,Math.ceil((viewX+logicalW)/TILE)+1);
     for(let c=left;c<=right;c++){const x=c*TILE,y=groundY(x),zone=biomeAt(x);
       const blend=(edge)=>clamp((x-edge+260)/520,0,1);
@@ -849,8 +849,11 @@
     const top=Math.max(0,Math.floor((viewY-ORIGIN)/TILE)-1),bottom=Math.min(ROWS-1,Math.ceil((viewY+logicalH-ORIGIN)/TILE)+1);
     for(let r=top;r<=bottom;r++)for(let c=left;c<=right;c++){
       const type=tileAt(c,r),shake=(hitClock>0&&hitTile?.c===c&&hitTile?.r===r)||(blockImpact?.life>0&&blockImpact.c===c&&blockImpact.r===r),x=c*TILE+(shake?Math.round(Math.sin(performance.now()/20)*2):0),y=ORIGIN+r*TILE,noise=hash(c,r);
-      // 빈 칸에는 원래 블록의 점무늬를 그리지 않는다.
-      if(type===0){if(r>=surfaceRows[c])rect(c*TILE,y,TILE,TILE,'#1a2b38');continue;}
+      // 지표면에서 판 빈 칸에는 하늘과 지면 안개를 비춘다. 깊은 곳으로 갈수록 동굴 배경이 된다.
+      if(type===0){const depth=r-surfaceRows[c];
+        if(depth>=0){const darkness=Math.min(1,(depth+.5)/8);
+          rect(c*TILE,y,TILE,TILE,`rgba(26,43,56,${darkness.toFixed(3)})`);}
+        continue;}
       const biome=Math.floor(c*TILE/760)%3,zone=biomeAt(c*TILE);
       // 지상에서 보이는 광맥은 암석 표면으로 가린다. 지하에서는 주변만 드러난다.
       const visibleOre=type>=3&&type!==5&&s.player.y>=groundY(s.player.x)+TILE*.5&&
